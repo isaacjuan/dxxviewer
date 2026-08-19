@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+x64/
 fltk/build/
 
 # Local tooling settings

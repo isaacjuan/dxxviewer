@@ -5,9 +5,10 @@ small SVG-emitting CLI. Both share the same parser/core; no Qt or raw-Win32 code
 
 ## Build
 
-Toolchain: MinGW-w64 g++ (scoop), FLTK 1.4.5 (static) and Cairo (dynamic).
+Two toolchains are supported for the FLTK GUI (MinGW and MSVC); the CLI builds
+with either.
 
-### FLTK GUI (`fltk/`)
+### FLTK GUI — MinGW (Qt Creator / `build.bat`)
 
 ```bat
 cd fltk
@@ -24,6 +25,20 @@ Dependencies (absolute paths on this machine):
   closure (cairo + pixman + fontconfig/freetype/harfbuzz/glib/png/zlib/...) next
   to the exe.
 
+A qmake project (`fltk/dxxviewer-fltk.pro`) mirrors `build.bat` — open it in Qt
+Creator with a MinGW kit.
+
+### FLTK GUI — MSVC (Visual Studio)
+
+Open `fltk/dxxviewer-fltk.vcxproj` (x64, v143, C++20). Depends on:
+- FLTK static libs built for MSVC: `C:\Users\jissi\fltk-install-msvc`
+  (`fltk.lib`/`fltk_images.lib`/`fltk_png.lib`/`fltk_z.lib`), built from
+  `C:\Users\jissi\fltk-src` with the VS generator.
+- Cairo for MSVC via vcpkg: `C:\Users\jissi\vcpkg` → `installed\x64-windows`.
+  A post-build step copies the Cairo DLLs next to the exe.
+
+The MinGW and MSVC builds render identically (both use the Cairo path).
+
 ### CLI
 
 ```bash
@@ -33,7 +48,8 @@ cmake --build build
 
 `dxxviewer.exe <file.dxx>` parses and writes `preview.svg` to the current
 directory. No stdout on success. (`main.cpp` has a hardcoded default input path
-only used when no argument is passed.)
+only used when no argument is passed.) A Visual Studio project
+(`dxxviewer.vcxproj`, x64/v143) also builds the CLI.
 
 ## Architecture
 

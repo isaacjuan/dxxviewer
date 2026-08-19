@@ -15,15 +15,21 @@ definitions with parametric geometry, node graphs, and extrusion profiles).
 
 ## Build
 
-Requires MinGW-w64 g++, FLTK 1.4.5 (static), and Cairo (dynamic, via MSYS2).
+The FLTK GUI builds with either MinGW-w64 or MSVC; the CLI builds with either.
+
+**MinGW** (Qt Creator / command line):
 
 ```bat
 cd fltk
 cmd /c build.bat
 ```
 
-Output: `fltk\build\dxxviewer-fltk.exe` (+ Cairo runtime DLLs). Run with an
-optional file path.
+Output: `fltk\build\dxxviewer-fltk.exe` (+ Cairo runtime DLLs). A qmake project
+(`fltk/dxxviewer-fltk.pro`) opens the same target in Qt Creator.
+
+**MSVC** (Visual Studio): open `fltk/dxxviewer-fltk.vcxproj` (x64, v143). Needs
+FLTK-for-MSVC (`C:\Users\jissi\fltk-install-msvc`) and Cairo-for-MSVC (vcpkg
+`cairo:x64-windows`). A post-build step copies the Cairo DLLs next to the exe.
 
 CLI (parses a `.dxx` and writes `preview.svg`):
 
@@ -31,6 +37,8 @@ CLI (parses a `.dxx` and writes `preview.svg`):
 cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build
 ```
+
+or open `dxxviewer.vcxproj` in Visual Studio.
 
 ## Project structure
 
