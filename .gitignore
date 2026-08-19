@@ -1,0 +1,9 @@
+# Build artifacts
+build/
+fltk/build/
+
+# Local tooling settings
+.claude/
+
+# Editor / OS cruft
+*.user
