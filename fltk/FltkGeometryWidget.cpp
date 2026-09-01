@@ -41,7 +41,12 @@ FltkGeometryWidget::Viewport FltkGeometryWidget::computeViewport(
         for (const auto& seg : c.segments)
             b.add(seg.pt.x, seg.pt.y);
 
-    if (b.maxX - b.minX < 1e-10 || b.maxY - b.minY < 1e-10) return {};
+    // Only bail out when there's truly nothing to show. A curve degenerate
+    // in one axis (a straight line running exactly along X or Y - common
+    // for connector/alignment lines in a BIM export) or even a single point
+    // still has real geometry; padding both axes below always yields a
+    // non-zero span, so this used to hide real geometry as "No geometry".
+    if (!b.valid) return {};
 
     double pad = std::max(10.0, std::max(b.maxX - b.minX, b.maxY - b.minY) * 0.1);
     b.minX -= pad; b.minY -= pad; b.maxX += pad; b.maxY += pad;
