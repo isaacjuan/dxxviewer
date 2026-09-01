@@ -8,3 +8,4 @@ fltk/build/
 
 # Editor / OS cruft
 *.user
+.vs/

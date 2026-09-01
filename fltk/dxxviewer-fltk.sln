@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37516.0 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dxxviewer-fltk", "dxxviewer-fltk.vcxproj", "{11AC8195-0DB2-4C9B-8717-FAB33E27CCC3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{11AC8195-0DB2-4C9B-8717-FAB33E27CCC3}.Debug|x64.ActiveCfg = Debug|x64
+		{11AC8195-0DB2-4C9B-8717-FAB33E27CCC3}.Debug|x64.Build.0 = Debug|x64
+		{11AC8195-0DB2-4C9B-8717-FAB33E27CCC3}.Release|x64.ActiveCfg = Release|x64
+		{11AC8195-0DB2-4C9B-8717-FAB33E27CCC3}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {11D9EEB8-9E07-4A5E-BBC6-8EF6D54A219A}
+	EndGlobalSection
+EndGlobal

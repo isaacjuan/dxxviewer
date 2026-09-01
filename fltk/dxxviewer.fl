@@ -1,0 +1,100 @@
+# data file for the Fltk User Interface Designer (fluid)
+version 1.0401
+header_name {.h}
+code_name {.cxx}
+comment {// Design reference for the DXX Viewer FLTK GUI.
+//
+// The real app is hand-coded in fltk/ (FltkMainWindow.cpp etc.); this .fl
+// mirrors its top-level layout so it can be opened/edited in Fluid.
+//
+// The three content panes are custom widgets (FltkTreePanel, FltkPropertiesPanel,
+// FltkGeometryWidget) represented here as placeholders carrying only their class
+// name. Their internals, Cairo drawing and callbacks are not representable in
+// Fluid. The real layout uses a Fl_Tile anchored at (0,0) with a floating
+// toolbar; here the toolbar is a separate strip above the tile for clarity.} {in_source not_in_header
+}
+
+decl {\#include <FL/Fl_Double_Window.H>} {public global
+}
+
+decl {\#include <FL/Fl_Button.H>} {public global
+}
+
+decl {\#include <FL/Fl_Input.H>} {public global
+}
+
+decl {\#include <FL/Fl_Flex.H>} {public global
+}
+
+decl {\#include <FL/Fl_Tile.H>} {public global
+}
+
+decl {\#include "FltkTreePanel.h"} {public global
+}
+
+decl {\#include "FltkPropertiesPanel.h"} {public global
+}
+
+decl {\#include "FltkGeometryWidget.h"} {public global
+}
+
+Function {make_window()} {open
+} {
+  Fl_Window {} {
+    label {DXX Viewer} open
+    xywh {0 0 1180 700} type Double visible
+  } {
+    Fl_Flex toolbar {
+      label {toolbar}
+      xywh {0 0 1180 32} type HORIZONTAL
+    } {
+      Fl_Button {} {
+        label {Open}
+        xywh {0 0 70 32}
+      }
+      Fl_Button {} {
+        label {Reload}
+        xywh {70 0 70 32}
+      }
+      Fl_Button {} {
+        label {+ Expand}
+        xywh {140 0 90 32}
+      }
+      Fl_Button {} {
+        label {- Collapse}
+        xywh {230 0 95 32}
+      }
+      Fl_Input {} {
+        xywh {325 0 719 32}
+      }
+      Fl_Button {} {
+        label {Find}
+        xywh {1044 0 60 32}
+      }
+      Fl_Button {} {
+        label {X}
+        xywh {1104 0 40 32}
+      }
+    }
+    Fl_Tile content {
+      label {content}
+      xywh {0 32 1180 668} resizable
+    } {
+      Fl_Group tree {
+        label {Document}
+        xywh {0 0 350 668}
+        class FltkTreePanel
+      }
+      Fl_Group props {
+        label {Properties}
+        xywh {350 0 830 334}
+        class FltkPropertiesPanel
+      }
+      Fl_Group geom {
+        label {Geometry}
+        xywh {350 334 830 334} resizable
+        class FltkGeometryWidget
+      }
+    }
+  }
+}
