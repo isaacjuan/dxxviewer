@@ -109,6 +109,11 @@ struct DxxDocument {
 
 std::optional<DxxDocument> parseFile(const std::string& filepath);
 
+// Same parsing as parseFile, but from an in-memory DXX text buffer instead of
+// a path on disk (e.g. a document received over hsbWebSocketHub's "map"
+// topic rather than opened from a file).
+std::optional<DxxDocument> parseString(const std::string& content);
+
 // Collects every "CURVE" node found anywhere under `node` (at any depth)
 // into local-coordinate Curve segments, reading 11PTX/11PTY/41BULGE.
 // Used by the interactive geometry preview in both GUIs — shared here so

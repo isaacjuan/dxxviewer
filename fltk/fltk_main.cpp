@@ -27,6 +27,10 @@ void applyWindowsAccent() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // Required once, before Fl::run(), so HubClient's background thread can
+    // deliver received maps to the GUI via Fl::awake().
+    Fl::lock();
+
     Fl::scheme("oxy");
     Fl::get_system_colors();
     Fl::set_font(FL_HELVETICA, "Segoe UI");

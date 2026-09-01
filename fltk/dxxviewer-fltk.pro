@@ -24,6 +24,7 @@ SOURCES += \
     FltkTreePanel.cpp \
     FltkPropertiesPanel.cpp \
     FltkGeometryWidget.cpp \
+    HubClient.cpp \
     ../dxx_parser.cpp \
     ../gzip_decompress.cpp
 
@@ -32,6 +33,7 @@ HEADERS += \
     FltkTreePanel.h \
     FltkPropertiesPanel.h \
     FltkGeometryWidget.h \
+    HubClient.h \
     ../dxx_parser.h \
     ../colors.h
 

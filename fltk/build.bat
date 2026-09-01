@@ -27,6 +27,7 @@ if not exist build mkdir build
     FltkTreePanel.cpp ^
     FltkPropertiesPanel.cpp ^
     FltkGeometryWidget.cpp ^
+    HubClient.cpp ^
     ..\dxx_parser.cpp ^
     ..\gzip_decompress.cpp ^
     -I. ^

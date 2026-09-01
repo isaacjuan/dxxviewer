@@ -90,6 +90,7 @@
     <ClCompile Include="FltkTreePanel.cpp" />
     <ClCompile Include="FltkPropertiesPanel.cpp" />
     <ClCompile Include="FltkGeometryWidget.cpp" />
+    <ClCompile Include="HubClient.cpp" />
     <ClCompile Include="..\dxx_parser.cpp" />
     <ClCompile Include="..\gzip_decompress.cpp" />
   </ItemGroup>
@@ -98,6 +99,7 @@
     <ClInclude Include="FltkTreePanel.h" />
     <ClInclude Include="FltkPropertiesPanel.h" />
     <ClInclude Include="FltkGeometryWidget.h" />
+    <ClInclude Include="HubClient.h" />
     <ClInclude Include="..\dxx_parser.h" />
     <ClInclude Include="..\colors.h" />
   </ItemGroup>

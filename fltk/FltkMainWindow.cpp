@@ -2,6 +2,7 @@
 #include "FltkTreePanel.h"
 #include "FltkPropertiesPanel.h"
 #include "FltkGeometryWidget.h"
+#include "HubClient.h"
 
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -25,6 +26,11 @@ const char* kCollapseLabel = "- Collapse";
 const char* kFindLabel = "Find";
 const char* kClearLabel = "X";
 const int kToolbarH = 32;
+
+const char* kHubHost = "127.0.0.1";
+const unsigned short kHubPort = 8181;
+const char* kHubTopic = "map";
+const char* kAppVersion = "1.0.0";
 } // namespace
 
 FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
@@ -32,7 +38,14 @@ FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
 {
     buildLayout();
     end();
+    updateTitle();
+
+    m_hub = std::make_unique<HubClient>(kHubHost, kHubPort, kHubTopic,
+        [this](std::string dxxText) { onMapReceived(std::move(dxxText)); },
+        [this](bool connected) { onHubConnectionChanged(connected); });
 }
+
+FltkMainWindow::~FltkMainWindow() = default;
 
 void FltkMainWindow::resize(int x, int y, int w, int h)
 {
@@ -144,12 +157,44 @@ bool FltkMainWindow::openFile(const char* path)
     }
     m_doc = std::make_unique<dxx::DxxDocument>(std::move(*doc));
     m_filePath = path ? path : "";
+    m_fromMap = false;
     m_tree->resetSearch();
-    const std::string title = "DXX Viewer - " + m_filePath;
-    if (window())
-        window()->copy_label(title.c_str());
+    updateTitle();
     populateTree();
     return true;
+}
+
+void FltkMainWindow::onMapReceived(std::string dxxText)
+{
+    auto doc = dxx::parseString(dxxText);
+    if (!doc) {
+        std::fprintf(stderr, "dxxviewer: failed to parse map received from hub\n");
+        return;
+    }
+    m_doc = std::make_unique<dxx::DxxDocument>(std::move(*doc));
+    m_filePath.clear();
+    m_fromMap = true;
+    m_tree->resetSearch();
+    updateTitle();
+    populateTree();
+}
+
+void FltkMainWindow::onHubConnectionChanged(bool connected)
+{
+    m_hubConnected = connected;
+    updateTitle();
+}
+
+void FltkMainWindow::updateTitle()
+{
+    std::string title = std::string("DXX Viewer ") + kAppVersion;
+    if (m_fromMap)
+        title += " - map@8181";
+    else if (!m_filePath.empty())
+        title += " - " + m_filePath;
+    title += m_hubConnected ? "  [hub: connected]" : "  [hub: offline]";
+    if (window())
+        window()->copy_label(title.c_str());
 }
 
 void FltkMainWindow::populateTree()

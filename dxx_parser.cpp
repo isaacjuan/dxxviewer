@@ -52,17 +52,20 @@ CodeAndTag splitCodeLine(const std::string& line) {
     return {line.substr(0, i), line.substr(i)};
 }
 
-std::vector<std::string> readLines(const std::string& filepath) {
-    std::ifstream file(filepath, std::ios::binary);
-    if (!file.is_open()) return {};
-
+std::vector<std::string> splitLines(std::istream& stream) {
     std::vector<std::string> lines;
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(stream, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         lines.push_back(std::move(line));
     }
     return lines;
+}
+
+std::vector<std::string> readLines(const std::string& filepath) {
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) return {};
+    return splitLines(file);
 }
 
 class Parser {
@@ -243,8 +246,9 @@ void collectCurves(const DxxNode& node, Curve& currentCurve,
 
 } // anonymous namespace
 
-std::optional<DxxDocument> parseFile(const std::string& filepath) {
-    auto lines = readLines(filepath);
+namespace {
+
+std::optional<DxxDocument> buildDocument(std::vector<std::string> lines) {
     if (lines.empty()) return std::nullopt;
 
     Parser parser(std::move(lines));
@@ -257,6 +261,17 @@ std::optional<DxxDocument> parseFile(const std::string& filepath) {
         collectCurves(child, temp, doc.curves, 0);
     }
     return doc;
+}
+
+} // anonymous namespace
+
+std::optional<DxxDocument> parseFile(const std::string& filepath) {
+    return buildDocument(readLines(filepath));
+}
+
+std::optional<DxxDocument> parseString(const std::string& content) {
+    std::istringstream stream(content);
+    return buildDocument(splitLines(stream));
 }
 
 std::vector<Curve> extractCurves(const DxxNode& node) {

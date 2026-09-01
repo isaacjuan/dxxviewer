@@ -63,14 +63,29 @@ only used when no argument is passed.) A Visual Studio project
   - `gzip_decompress.cpp` — self-contained inflate; no external compression lib.
   - `colors.h` — header-only curve/tree-depth color palettes as `uint32_t`.
 - **FLTK GUI** (`fltk/`, namespace `dxxviewer`):
-  - `fltk_main.cpp` — entry point (scheme/fonts/accent/window).
+  - `fltk_main.cpp` — entry point (scheme/fonts/accent/window). Calls
+    `Fl::lock()` before `Fl::run()` so `HubClient`'s background thread can
+    hand received documents to the GUI via `Fl::awake()`.
   - `FltkMainWindow` — coordinator: toolbar + `Fl_Tile` layout, file open,
-    document ownership, search routing, tree→panels selection wiring.
+    document ownership, search routing, tree→panels selection wiring. Also
+    owns the `HubClient`.
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
   - `FltkGeometryWidget` (`Fl_Widget`) — profile preview rendered with **Cairo**
     (anti-aliased) into an image surface, blitted via `fl_draw_image`; pan/zoom
     + dimension annotations.
+  - `HubClient` — minimal hand-rolled WebSocket client (Winsock2 directly, no
+    external WS library — same self-contained-over-dependency approach as
+    `gzip_decompress.cpp`) that connects to `hsbWebSocketHub` (sibling project,
+    `D:\dev_jp\hsbWebSocketHub`, `ws://127.0.0.1:8181/ws`), subscribes to the
+    `"map"` topic, and reconnects indefinitely on failure. A topic broadcast is
+    expected to be a JSON string (the raw `.dxx` text) — decoded and parsed
+    via `dxx::parseString`, then displayed exactly like an opened file except
+    the window title reads `map@8181` and there is no `m_filePath` (Reload is
+    a no-op for a live document). Also reports live connect/disconnect via a
+    second callback; `FltkMainWindow::updateTitle()` composes the title from
+    app version + source (file path / `map@8181`) + `[hub: connected|offline]`
+    from that state. GUI-only: the CLI has no network code.
 - **CLI** (`main.cpp`) — parses and writes `preview.svg`.
 
 ## FLTK implementation gotchas
