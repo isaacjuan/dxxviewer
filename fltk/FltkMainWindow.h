@@ -37,7 +37,7 @@ private:
     void doSearch();
     void clearSearch();
     void populateTree();
-    void onMapReceived(std::string dxxText);
+    void onMapReceived(std::string dxxText, std::string filename);
     void onHubConnectionChanged(bool connected);
     void updateTitle();
 
@@ -50,6 +50,7 @@ private:
     std::unique_ptr<dxx::DxxDocument> m_doc;
     std::string m_filePath;
     bool m_fromMap = false;
+    std::string m_mapFilename;
     bool m_hubConnected = false;
     std::unique_ptr<HubClient> m_hub;
 };

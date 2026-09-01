@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <random>
 
 #ifdef _MSC_VER
@@ -121,6 +122,44 @@ bool decodeJsonStringLiteral(const std::string& msg, std::string& out) {
             }
             default: out += esc; break;
         }
+    }
+    return true;
+}
+
+std::string base64Decode(const std::string& in) {
+    static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    int val = 0, valb = -8;
+    for (unsigned char c : in) {
+        if (c == '=') break;
+        const char* p = std::strchr(table, static_cast<char>(c));
+        if (!p) continue;
+        val = (val << 6) + static_cast<int>(p - table);
+        valb += 6;
+        if (valb >= 0) {
+            out.push_back(static_cast<char>((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return out;
+}
+
+// Extracts one string field's raw value from a flat, single-level JSON
+// object - matched to exactly the {filename, size, content_base64} shape
+// the toolkit's `cb64` emits (dotnet/TOOLKIT.md), the same way `cb64dec`
+// reads it back. Not a general JSON parser.
+bool extractJsonObjectStringField(const std::string& json, const std::string& field, std::string& out) {
+    size_t pos = json.find("\"" + field + "\"");
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos);
+    if (pos == std::string::npos) return false;
+    pos = json.find('"', pos);
+    if (pos == std::string::npos) return false;
+
+    out.clear();
+    for (size_t i = pos + 1; i < json.size() && json[i] != '"'; ++i) {
+        if (json[i] == '\\' && i + 1 < json.size()) { out += json[++i]; continue; }
+        out += json[i];
     }
     return true;
 }
@@ -240,7 +279,7 @@ void postToMain(std::function<void()> fn) {
 } // anonymous namespace
 
 HubClient::HubClient(std::string host, unsigned short port, std::string topic,
-                       std::function<void(std::string)> onMapText,
+                       std::function<void(std::string, std::string)> onMapText,
                        std::function<void(bool)> onConnectionChanged)
     : m_host(std::move(host)), m_port(port), m_topic(std::move(topic)),
       m_onMapText(std::move(onMapText)),
@@ -312,13 +351,31 @@ void HubClient::run() {
             std::string message;
             while (!m_stop.load() && readMessage(sock, m_stop, message)) {
                 if (!isControlReply(message)) {
-                    std::string text;
-                    if (decodeJsonStringLiteral(message, text)) {
-                        postToMain([this, text = std::move(text)]() mutable {
-                            m_onMapText(std::move(text));
+                    size_t firstCh = message.find_first_not_of(" \t\r\n");
+                    std::string text, filename;
+                    bool decoded = false;
+
+                    if (firstCh != std::string::npos && message[firstCh] == '{') {
+                        // The toolkit's `cb64 | sendws` shape: a JSON object
+                        // {filename, size, content_base64} - see dotnet/TOOLKIT.md.
+                        std::string b64;
+                        if (extractJsonObjectStringField(message, "content_base64", b64)) {
+                            text = base64Decode(b64);
+                            extractJsonObjectStringField(message, "filename", filename);
+                            decoded = true;
+                        }
+                    } else if (firstCh != std::string::npos && message[firstCh] == '"') {
+                        // A producer publishing the raw DXX text directly as a
+                        // JSON string (e.g. a plain `sendws --topic map` line).
+                        decoded = decodeJsonStringLiteral(message, text);
+                    }
+
+                    if (decoded) {
+                        postToMain([this, text = std::move(text), filename = std::move(filename)]() mutable {
+                            m_onMapText(std::move(text), std::move(filename));
                         });
                     } else {
-                        std::fprintf(stderr, "dxxviewer: ignoring non-string map payload on topic '%s'\n",
+                        std::fprintf(stderr, "dxxviewer: ignoring unrecognized map payload shape on topic '%s'\n",
                                      m_topic.c_str());
                     }
                 }

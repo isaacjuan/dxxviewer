@@ -19,13 +19,17 @@ namespace dxxviewer {
 // Fl::awake - callers must have called Fl::lock() once at startup.
 class HubClient {
 public:
-    // onMapText fires with the raw DXX text every time a message arrives on
-    // `topic`. onConnectionChanged fires with true right after the
+    // onMapText fires with (dxxText, filename) every time a message arrives
+    // on `topic`. `filename` is whatever the producer attached (e.g. the
+    // "filename" field of the toolkit's `cb64 | sendws` shape - see
+    // dotnet/TOOLKIT.md) or empty if the producer sent none (e.g. a plain
+    // `sendws --topic map` line publishing the DXX text as a bare JSON
+    // string). onConnectionChanged fires with true right after the
     // subscribe handshake succeeds and with false when that connection is
     // lost (before each reconnect attempt) - so a caller can reflect live
     // hub status (e.g. in a window title) without polling.
     HubClient(std::string host, unsigned short port, std::string topic,
-               std::function<void(std::string)> onMapText,
+               std::function<void(std::string dxxText, std::string filename)> onMapText,
                std::function<void(bool)> onConnectionChanged);
     ~HubClient();
 
@@ -38,7 +42,7 @@ private:
     std::string m_host;
     unsigned short m_port;
     std::string m_topic;
-    std::function<void(std::string)> m_onMapText;
+    std::function<void(std::string, std::string)> m_onMapText;
     std::function<void(bool)> m_onConnectionChanged;
     std::atomic<bool> m_stop{false};
     std::thread m_thread;

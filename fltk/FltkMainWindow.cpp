@@ -41,7 +41,9 @@ FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
     updateTitle();
 
     m_hub = std::make_unique<HubClient>(kHubHost, kHubPort, kHubTopic,
-        [this](std::string dxxText) { onMapReceived(std::move(dxxText)); },
+        [this](std::string dxxText, std::string filename) {
+            onMapReceived(std::move(dxxText), std::move(filename));
+        },
         [this](bool connected) { onHubConnectionChanged(connected); });
 }
 
@@ -164,7 +166,7 @@ bool FltkMainWindow::openFile(const char* path)
     return true;
 }
 
-void FltkMainWindow::onMapReceived(std::string dxxText)
+void FltkMainWindow::onMapReceived(std::string dxxText, std::string filename)
 {
     auto doc = dxx::parseString(dxxText);
     if (!doc) {
@@ -174,6 +176,7 @@ void FltkMainWindow::onMapReceived(std::string dxxText)
     m_doc = std::make_unique<dxx::DxxDocument>(std::move(*doc));
     m_filePath.clear();
     m_fromMap = true;
+    m_mapFilename = std::move(filename);
     m_tree->resetSearch();
     updateTitle();
     populateTree();
@@ -189,7 +192,7 @@ void FltkMainWindow::updateTitle()
 {
     std::string title = std::string("DXX Viewer ") + kAppVersion;
     if (m_fromMap)
-        title += " - map@8181";
+        title += " - " + (m_mapFilename.empty() ? std::string("map@8181") : m_mapFilename);
     else if (!m_filePath.empty())
         title += " - " + m_filePath;
     title += m_hubConnected ? "  [hub: connected]" : "  [hub: offline]";
