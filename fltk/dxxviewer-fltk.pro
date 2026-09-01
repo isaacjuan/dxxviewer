@@ -2,8 +2,9 @@
 # DXX Viewer — FLTK GUI (qmake project for Qt Creator)
 #
 # Open this .pro in Qt Creator with a MinGW-w64 kit. It mirrors fltk/build.bat:
-# links FLTK 1.4.5 (static) and Cairo (dynamic). Run build.bat once to copy the
-# Cairo DLLs next to the exe, or add C:\msys64\mingw64\bin to PATH.
+# links FLTK 1.4.5 (static) and Cairo (dynamic). A POST_LINK step runs
+# copy_cairo_dlls.bat to copy the Cairo DLLs next to the exe, so the build is
+# self-contained.
 # ============================================================================
 
 CONFIG -= qt          # plain C++ app — no Qt linkage
@@ -44,3 +45,20 @@ LIBS += -lgdiplus -lole32 -luuid -lcomctl32 -lws2_32 -lwinspool -ldwmapi
 
 DEFINES += _LARGEFILE_SOURCE _LARGEFILE64_SOURCE _FILE_OFFSET_BITS=64
 QMAKE_LFLAGS += -static-libgcc -static-libstdc++ -mwindows
+
+# Copy the Cairo runtime DLLs next to the exe so the build is self-contained
+# (mirrors build.bat). Handles both the shadow-build subdir (debug/release)
+# and a flat out-of-source build.
+win32 {
+    CONFIG(debug_and_release) {
+        CONFIG(debug, debug|release): DLL_OUT = $$OUT_PWD/debug
+        else: DLL_OUT = $$OUT_PWD/release
+    } else {
+        DLL_OUT = $$OUT_PWD
+    }
+    CAIRO_BIN = $$CAIRO_ROOT/bin
+    DLL_DEST = $$shell_path($$DLL_OUT)
+    QMAKE_POST_LINK = $$shell_path($$PWD/copy_cairo_dlls.bat) $$CAIRO_BIN $$DLL_DEST
+}
+
+

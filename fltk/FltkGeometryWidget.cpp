@@ -226,7 +226,7 @@ void FltkGeometryWidget::drawCurvesCairo(const std::vector<dxx::Curve>& curves,
 
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-    cairo_set_line_width(cr, 1.0);
+    cairo_set_line_width(cr, 0.5);
 
     for (size_t ci = 0; ci < curves.size(); ++ci) {
         const dxx::Curve& curve = curves[ci];
