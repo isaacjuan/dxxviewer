@@ -439,4 +439,67 @@ std::optional<NodeColor> extractNodeColor(const DxxNode& node) {
     });
 }
 
+namespace {
+
+const DxxNode* findMeshContainer(const DxxNode& node, int depth = 0) {
+    if (depth > kMaxNodeDepth) return nullptr;
+
+    const DxxNode* vertexList = nullptr;
+    const DxxNode* faceList = nullptr;
+    for (const auto& child : node.children) {
+        if (child.name == "vertexList") vertexList = &child;
+        else if (child.name == "faceList") faceList = &child;
+    }
+    if (vertexList && faceList) return &node;
+
+    for (const auto& child : node.children)
+        if (const DxxNode* found = findMeshContainer(child, depth + 1)) return found;
+    return nullptr;
+}
+
+} // anonymous namespace
+
+std::optional<MeshBody> extractMeshBody(const DxxNode& node) {
+    const DxxNode* container = findMeshContainer(node);
+    if (!container) return std::nullopt;
+
+    const DxxNode* vertexList = nullptr;
+    const DxxNode* faceList = nullptr;
+    for (const auto& child : container->children) {
+        if (child.name == "vertexList") vertexList = &child;
+        else if (child.name == "faceList") faceList = &child;
+    }
+
+    MeshBody mesh;
+    Point3D cur;
+    int have = 0;
+    for (const auto& [key, val] : vertexList->properties) {
+        double d = std::strtod(val.c_str(), nullptr);
+        if (key == "10pX") { cur.x = d; have |= 1; }
+        else if (key == "10pY") { cur.y = d; have |= 2; }
+        else if (key == "10pZ") {
+            cur.z = d;
+            have |= 4;
+            if (have == 7) { mesh.vertices.push_back(cur); cur = Point3D{}; have = 0; }
+        }
+    }
+
+    for (const auto& [key, val] : faceList->properties) {
+        if (key != "f") continue;
+        std::vector<int> indices;
+        size_t start = 0;
+        while (start <= val.size()) {
+            size_t semi = val.find(';', start);
+            std::string tok = val.substr(start, semi == std::string::npos ? std::string::npos : semi - start);
+            if (!tok.empty()) indices.push_back(std::atoi(tok.c_str()));
+            if (semi == std::string::npos) break;
+            start = semi + 1;
+        }
+        if (indices.size() >= 2) mesh.faces.push_back(std::move(indices));
+    }
+
+    if (mesh.vertices.empty() || mesh.faces.empty()) return std::nullopt;
+    return mesh;
+}
+
 } // namespace dxx

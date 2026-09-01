@@ -13,13 +13,18 @@ namespace dxxviewer {
 class FltkTreePanel;
 class FltkPropertiesPanel;
 class FltkGeometryWidget;
+class FltkMeshWidget;
 class HubClient;
 
 // Main window: toolbar (Open/Reload/Expand/Collapse/Search) above a
 // horizontal split of tree | (properties + geometry). Owns the parsed
-// document and wires tree selection to the two detail panels. Also runs a
-// HubClient that subscribes to hsbWebSocketHub's "map" topic (127.0.0.1:8181)
-// so a document can arrive live over the network instead of only from disk.
+// document and wires tree selection to the two detail panels - the 2D
+// profile widget (FltkGeometryWidget) for CURVE-based nodes, or the 3D
+// mesh widget (FltkMeshWidget) when the selected node contains a
+// SimpleBody-style mesh (see dxx::extractMeshBody); only one is visible
+// at a time. Also runs a HubClient that subscribes to hsbWebSocketHub's
+// "map" topic (127.0.0.1:8181) so a document can arrive live over the
+// network instead of only from disk.
 class FltkMainWindow : public Fl_Group {
 public:
     explicit FltkMainWindow(int x, int y, int w, int h, const char* label = nullptr);
@@ -43,11 +48,14 @@ private:
 
     FltkTreePanel*       m_tree = nullptr;
     FltkPropertiesPanel* m_props = nullptr;
+    Fl_Group*            m_geomHost = nullptr;
     FltkGeometryWidget*  m_geom = nullptr;
+    FltkMeshWidget*      m_mesh = nullptr;
     Fl_Flex*             m_toolbar = nullptr;
     Fl_Input*            m_searchEdit = nullptr;
 
     std::unique_ptr<dxx::DxxDocument> m_doc;
+    std::unique_ptr<dxx::MeshBody> m_meshCache;
     std::string m_filePath;
     bool m_fromMap = false;
     std::string m_mapFilename;

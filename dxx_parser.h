@@ -145,6 +145,25 @@ struct NodeColor {
 // and returns its RGB color, for the geometry-preview color swatch.
 [[nodiscard]] std::optional<NodeColor> extractNodeColor(const DxxNode& node);
 
+// A solid mesh body: a flat vertex list plus faces as loops of indices into
+// it (mirrors a "SimpleBody" node's vertexList/faceList children - see
+// dxxviewer/AGENTS.md). Rendered as a 3D wireframe, unrelated to the 2D
+// profile Curve/CurveSegment types above.
+struct MeshBody {
+    std::vector<Point3D> vertices;
+    std::vector<std::vector<int>> faces;
+};
+
+// Finds the nearest descendant of `node` (or `node` itself) that has both a
+// "vertexList" and a "faceList" child - a mesh body, regardless of what its
+// container node happens to be named (in practice "SimpleBody") - and
+// extracts it. vertexList's properties are read as consecutive 10pX/10pY/
+// 10pZ triples (one vertex each); faceList's properties are each named "f"
+// with a ';'-separated string of vertex indices (one closed face loop each).
+// Returns nullopt if no such container exists under `node`, or it has no
+// vertices/faces.
+[[nodiscard]] std::optional<MeshBody> extractMeshBody(const DxxNode& node);
+
 // Tessellates a curve's bulge arcs into straight segments and places each
 // point in world space via origin + x*vecX + y*vecY + z*normal, returning a
 // single closed polyline. For renderers (the 3D view) that need flat 3D

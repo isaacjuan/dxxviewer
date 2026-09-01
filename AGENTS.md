@@ -19,11 +19,17 @@ Produces `fltk\build\dxxviewer-fltk.exe` plus the Cairo runtime DLLs it copies
 next to the exe. Run with an optional path: `dxxviewer-fltk.exe file.dxx`.
 
 Dependencies (absolute paths on this machine):
-- FLTK static libs: `C:\Users\jissi\fltk-install` (`lib\libfltk*.a`, `include\FL\*.H`).
+- FLTK static libs: `C:\Users\jissi\fltk-install` (`lib\libfltk*.a`, `include\FL\*.H`),
+  including `libfltk_gl.a`/`FL/Fl_Gl_Window.H` for the 3D mesh view — already
+  built into this FLTK install, no separate install step.
 - Cairo headers + import lib: `C:\msys64\mingw64` (`include\cairo\cairo.h`, `lib\libcairo.dll.a`).
   Installed via `pacman -S mingw-w64-x86_64-cairo`. `build.bat` copies the DLL
   closure (cairo + pixman + fontconfig/freetype/harfbuzz/glib/png/zlib/...) next
   to the exe.
+- `opengl32`/`glu32` — Windows system libraries (MinGW and MSVC both ship import
+  libs for these), linked for the 3D mesh view. No install, no vcpkg/pacman
+  package; not the same thing as the `VulkanSDK` sitting at the workspace root,
+  which this project does not use.
 
 A qmake project (`fltk/dxxviewer-fltk.pro`) mirrors `build.bat` — open it in Qt
 Creator with a MinGW kit.
@@ -59,7 +65,10 @@ only used when no argument is passed.) A Visual Studio project
     `parseFile`) plus the geometry helpers: `extractCurves` (flattened local 2D),
     `extractCurves3D` (keeps 3D placement), `extractProfile2D` (projects CURVE
     points onto the profile plane for a true cross-section), `extractNodeColor`
-    (70R/70G/70B lookup for the color swatch), and `tessellateCurveWorld`.
+    (70R/70G/70B lookup for the color swatch), `tessellateCurveWorld`, and
+    `extractMeshBody` (finds the nearest `vertexList`+`faceList` pair under a
+    node - in practice a `SimpleBody`, a solid mesh unrelated to CURVE-based
+    profiles - and reads it into a flat `MeshBody{vertices, faces}`).
   - `gzip_decompress.cpp` — self-contained inflate; no external compression lib.
   - `colors.h` — header-only curve/tree-depth color palettes as `uint32_t`.
 - **FLTK GUI** (`fltk/`, namespace `dxxviewer`):
@@ -68,12 +77,28 @@ only used when no argument is passed.) A Visual Studio project
     hand received documents to the GUI via `Fl::awake()`.
   - `FltkMainWindow` — coordinator: toolbar + `Fl_Tile` layout, file open,
     document ownership, search routing, tree→panels selection wiring. Also
-    owns the `HubClient`.
+    owns the `HubClient`. `onNodeSelected` tries `dxx::extractMeshBody` on the
+    selected node first; if it finds a mesh, `FltkMeshWidget` is shown and
+    `FltkGeometryWidget` hidden, else vice versa with the 2D profile curves -
+    both widgets sit at the same rect inside a plain `Fl_Group` (`m_geomHost`,
+    a single child of the content `Fl_Tile`) so Fl_Tile's drag-resize
+    hit-testing only ever sees one child there. `openFile`/`onMapReceived`
+    call `onNodeSelected(nullptr)` before swapping `m_doc`, clearing both
+    widgets' node/mesh pointers so neither can dereference the document being
+    replaced (a live "map" arriving repeatedly makes this much more likely to
+    matter than the original one-document-per-session file-open flow).
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
-  - `FltkGeometryWidget` (`Fl_Widget`) — profile preview rendered with **Cairo**
-    (anti-aliased) into an image surface, blitted via `fl_draw_image`; pan/zoom
-    + dimension annotations.
+  - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with
+    **Cairo** (anti-aliased) into an image surface, blitted via `fl_draw_image`;
+    pan/zoom + dimension annotations.
+  - `FltkMeshWidget` (`Fl_Gl_Window`) — 3D wireframe preview of a `MeshBody`
+    (fixed-function/legacy OpenGL - `glBegin(GL_LINE_LOOP)` per face, no
+    shading/lighting/hidden-line removal); orbit via left-drag, zoom via wheel,
+    double-click to reset, mirroring the 2D widget's interaction vocabulary.
+    Being an `Fl_Gl_Window` makes it a real native child window, not a plain
+    widget drawn into the parent surface like `FltkGeometryWidget` - see the
+    gotcha below.
   - `HubClient` — minimal hand-rolled WebSocket client (Winsock2 directly, no
     external WS library — same self-contained-over-dependency approach as
     `gzip_decompress.cpp`) that connects to `hsbWebSocketHub` (sibling project,
@@ -109,6 +134,13 @@ only used when no argument is passed.) A Visual Studio project
   widget-sized (0..w) and blitted at `x(),y()`.
 - `build.bat` must stay CRLF + ASCII (no em-dashes; a `)` inside an
   `if (...)` block terminates the block early).
+- **`FltkMeshWidget` (`Fl_Gl_Window`) is a real native child window**, unlike
+  every other widget in this app - hiding/showing it (to toggle with
+  `FltkGeometryWidget`) doesn't get picked up by FLTK's normal shared-surface
+  redraw the way a plain `Fl_Widget` sibling would. `onNodeSelected` calls
+  `m_geomHost->redraw()` after every visibility toggle to force the newly-
+  revealed widget to repaint; without it the previous widget's last frame can
+  stay visible on top after switching selection.
 
 ## DXX file format
 

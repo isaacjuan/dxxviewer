@@ -2,6 +2,7 @@
 #include "FltkTreePanel.h"
 #include "FltkPropertiesPanel.h"
 #include "FltkGeometryWidget.h"
+#include "FltkMeshWidget.h"
 #include "HubClient.h"
 
 #include <FL/Fl.H>
@@ -79,12 +80,26 @@ void FltkMainWindow::buildLayout()
     // Fl_Scroll, so reset it to the tile before adding the next child.
     content->begin();
 
-    m_geom = new FltkGeometryWidget(350, kToolbarH + propsH, w() - 350, contentH - propsH, "Geometry");
+    // Geometry pane: the 2D profile widget and the 3D mesh widget occupy the
+    // exact same rect inside a plain Fl_Group (not the tile directly - Fl_Tile's
+    // drag-resize hit-testing assumes non-overlapping children); onNodeSelected
+    // shows whichever one applies to the current selection and hides the other.
+    // Both spanning the group's full rect means Fl_Group's default resize
+    // (preserving each child's margin to the group's original edges - zero on
+    // all four sides here) keeps them sized to the group with no extra code.
+    int geomX = 350, geomY = kToolbarH + propsH, geomW = w() - 350, geomH = contentH - propsH;
+    m_geomHost = new Fl_Group(geomX, geomY, geomW, geomH);
+    m_geomHost->begin();
+    m_geom = new FltkGeometryWidget(geomX, geomY, geomW, geomH, "Geometry");
     m_geom->align(FL_ALIGN_TOP | FL_ALIGN_LEFT);
-    content->size_range(m_geom, 120, 80);
+    m_mesh = new FltkMeshWidget(geomX, geomY, geomW, geomH);
+    m_mesh->hide();
+    m_geomHost->end();
+    m_geomHost->resizable(m_geom);
+    content->size_range(m_geomHost, 120, 80);
 
     content->end();
-    content->resizable(m_geom);
+    content->resizable(m_geomHost);
     resizable(content);
 
     // ── Toolbar row (floats on top of the tile's empty top strip) ───────────
@@ -157,6 +172,7 @@ bool FltkMainWindow::openFile(const char* path)
         fl_alert("Failed to parse file:\n%s", path ? path : "");
         return false;
     }
+    onNodeSelected(nullptr); // drop any pointers into the document being replaced
     m_doc = std::make_unique<dxx::DxxDocument>(std::move(*doc));
     m_filePath = path ? path : "";
     m_fromMap = false;
@@ -173,6 +189,7 @@ void FltkMainWindow::onMapReceived(std::string dxxText, std::string filename)
         std::fprintf(stderr, "dxxviewer: failed to parse map received from hub\n");
         return;
     }
+    onNodeSelected(nullptr); // drop any pointers into the document being replaced
     m_doc = std::make_unique<dxx::DxxDocument>(std::move(*doc));
     m_filePath.clear();
     m_fromMap = true;
@@ -209,7 +226,27 @@ void FltkMainWindow::populateTree()
 void FltkMainWindow::onNodeSelected(const dxx::DxxNode* node)
 {
     m_props->fill(node);
-    m_geom->showNode(node);
+
+    m_meshCache.reset();
+    if (node) {
+        if (auto mesh = dxx::extractMeshBody(*node))
+            m_meshCache = std::make_unique<dxx::MeshBody>(std::move(*mesh));
+    }
+
+    if (m_meshCache) {
+        m_geom->hide();
+        m_mesh->showMesh(m_meshCache.get());
+        m_mesh->show();
+    } else {
+        m_mesh->showMesh(nullptr);
+        m_mesh->hide();
+        m_geom->show();
+        m_geom->showNode(node);
+    }
+    // FltkMeshWidget is a real native child window (Fl_Gl_Window), unlike the
+    // plain-widget FltkGeometryWidget - hiding/showing it doesn't automatically
+    // repaint whichever sibling now occupies its screen area, so force it.
+    m_geomHost->redraw();
 }
 
 void FltkMainWindow::doSearch()

@@ -27,6 +27,7 @@ if not exist build mkdir build
     FltkTreePanel.cpp ^
     FltkPropertiesPanel.cpp ^
     FltkGeometryWidget.cpp ^
+    FltkMeshWidget.cpp ^
     HubClient.cpp ^
     ..\dxx_parser.cpp ^
     ..\gzip_decompress.cpp ^
@@ -39,8 +40,9 @@ if not exist build mkdir build
     -L%CAIRO_ROOT%\lib ^
     -static-libgcc -static-libstdc++ ^
     -mwindows ^
-    -lfltk -lfltk_images -lfltk_png -lfltk_z ^
+    -lfltk_gl -lfltk -lfltk_images -lfltk_png -lfltk_z ^
     -lcairo ^
+    -lopengl32 -lglu32 ^
     -lgdiplus -lole32 -luuid -lcomctl32 -lws2_32 -lwinspool -ldwmapi ^
     -o %OUT%
 

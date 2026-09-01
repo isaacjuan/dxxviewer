@@ -25,6 +25,7 @@ SOURCES += \
     FltkTreePanel.cpp \
     FltkPropertiesPanel.cpp \
     FltkGeometryWidget.cpp \
+    FltkMeshWidget.cpp \
     HubClient.cpp \
     ../dxx_parser.cpp \
     ../gzip_decompress.cpp
@@ -34,13 +35,15 @@ HEADERS += \
     FltkTreePanel.h \
     FltkPropertiesPanel.h \
     FltkGeometryWidget.h \
+    FltkMeshWidget.h \
     HubClient.h \
     ../dxx_parser.h \
     ../colors.h
 
 LIBS += -L$$FLTK_ROOT/lib -L$$CAIRO_ROOT/lib
-LIBS += -lfltk -lfltk_images -lfltk_png -lfltk_z
+LIBS += -lfltk_gl -lfltk -lfltk_images -lfltk_png -lfltk_z
 LIBS += -lcairo
+LIBS += -lopengl32 -lglu32
 LIBS += -lgdiplus -lole32 -luuid -lcomctl32 -lws2_32 -lwinspool -ldwmapi
 
 DEFINES += _LARGEFILE_SOURCE _LARGEFILE64_SOURCE _FILE_OFFSET_BITS=64
