@@ -11,7 +11,11 @@ namespace dxxviewer {
 FltkMeshWidget::FltkMeshWidget(int x, int y, int w, int h, const char* label)
     : Fl_Gl_Window(x, y, w, h, label)
 {
-    mode(FL_RGB | FL_DEPTH | FL_DOUBLE);
+    // FL_MULTISAMPLE requests a multisample-capable pixel format (hardware
+    // MSAA) if the driver supports one; falls back to non-multisampled
+    // silently otherwise. Combined with GL_LINE_SMOOTH in draw() for the
+    // wireframe's own per-line coverage antialiasing.
+    mode(FL_RGB | FL_DEPTH | FL_DOUBLE | FL_MULTISAMPLE);
 }
 
 void FltkMeshWidget::showMesh(const dxx::MeshBody* mesh)
@@ -53,6 +57,20 @@ void FltkMeshWidget::draw()
     if (!valid()) {
         glViewport(0, 0, w(), h());
         glEnable(GL_DEPTH_TEST);
+
+        // GL_MULTISAMPLE (0x809D, core since GL 1.3) isn't in the OpenGL 1.1
+        // header Windows ships - defining the enum ourselves needs no extension
+        // loader since the pixel format (FL_MULTISAMPLE above) already created
+        // the multisample buffer; this just turns sampling on for it.
+#ifndef GL_MULTISAMPLE
+#define GL_MULTISAMPLE 0x809D
+#endif
+        glEnable(GL_MULTISAMPLE);
+        glEnable(GL_LINE_SMOOTH);
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         valid(1);
     }
 

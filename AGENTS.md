@@ -96,9 +96,15 @@ only used when no argument is passed.) A Visual Studio project
     (fixed-function/legacy OpenGL - `glBegin(GL_LINE_LOOP)` per face, no
     shading/lighting/hidden-line removal); orbit via left-drag, zoom via wheel,
     double-click to reset, mirroring the 2D widget's interaction vocabulary.
-    Being an `Fl_Gl_Window` makes it a real native child window, not a plain
-    widget drawn into the parent surface like `FltkGeometryWidget` - see the
-    gotcha below.
+    Antialiased via `FL_MULTISAMPLE` (requests a multisample-capable pixel
+    format; the mode flag alone doesn't turn sampling on, so `draw()` also
+    calls `glEnable(GL_MULTISAMPLE)` - manually `#define`d, since Windows'
+    OpenGL 1.1 header predates it - plus `GL_LINE_SMOOTH` with alpha blending
+    for the lines' own edge coverage antialiasing) - falls back to
+    non-multisampled silently if the driver has no such pixel format. Being an
+    `Fl_Gl_Window` makes it a real native child window, not a plain widget
+    drawn into the parent surface like `FltkGeometryWidget` - see the gotcha
+    below.
   - `HubClient` — minimal hand-rolled WebSocket client (Winsock2 directly, no
     external WS library — same self-contained-over-dependency approach as
     `gzip_decompress.cpp`) that connects to `hsbWebSocketHub` (sibling project,
