@@ -2,9 +2,11 @@
 
 #include <FL/Fl.H>
 #include <FL/gl.h>
+#include <FL/glu.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace dxxviewer {
 
@@ -91,21 +93,105 @@ void FltkMeshWidget::draw()
         return;
     }
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    double aspect = h() > 0 ? static_cast<double>(w()) / h() : 1.0;
-    double viewSize = m_radius * 2.2 / m_zoom;
-    if (aspect >= 1.0)
-        glOrtho(-viewSize * aspect, viewSize * aspect, -viewSize, viewSize, -m_radius * 10, m_radius * 10);
-    else
-        glOrtho(-viewSize, viewSize, -viewSize / aspect, viewSize / aspect, -m_radius * 10, m_radius * 10);
+    setupProjection();
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+    if (m_perspective)
+        glTranslated(0, 0, -(m_radius * 3.0 / m_zoom));
     glRotated(m_pitch, 1, 0, 0);
     glRotated(m_yaw, 0, 1, 0);
     glTranslated(-m_centerX, -m_centerY, -m_centerZ);
 
+    if (m_shaded) drawShadedFaces();
+    drawWireframeEdges();
+    drawHint();
+}
+
+void FltkMeshWidget::setupProjection()
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    double aspect = h() > 0 ? static_cast<double>(w()) / h() : 1.0;
+
+    if (m_perspective) {
+        // Camera sits at distance camDist from the object's center (pushed
+        // back by the modelview translate in draw()); near/far bound a
+        // generous margin around it since m_radius is only an approximate
+        // bounding-box radius.
+        double camDist = m_radius * 3.0 / m_zoom;
+        double nearP = std::max(camDist - m_radius * 5.0, camDist * 0.01);
+        double farP = camDist + m_radius * 10.0;
+        gluPerspective(40.0, aspect, nearP, farP);
+    } else {
+        double viewSize = m_radius * 2.2 / m_zoom;
+        if (aspect >= 1.0)
+            glOrtho(-viewSize * aspect, viewSize * aspect, -viewSize, viewSize, -m_radius * 10, m_radius * 10);
+        else
+            glOrtho(-viewSize, viewSize, -viewSize / aspect, viewSize / aspect, -m_radius * 10, m_radius * 10);
+    }
+}
+
+void FltkMeshWidget::drawShadedFaces()
+{
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+
+    GLfloat lightDir[] = {0.4f, 0.6f, 1.0f, 0.0f}; // directional (w=0)
+    glLightfv(GL_LIGHT0, GL_POSITION, lightDir);
+    GLfloat ambient[] = {0.45f, 0.45f, 0.45f, 1.0f};
+    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
+    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, 1); // faces can wind either way
+
+    // Pushes the fill back slightly in depth so the wireframe pass (drawn
+    // without offset, right after) never z-fights with the coplanar fill.
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(1.0f, 1.0f);
+
+    glColor3f(0.58f, 0.70f, 0.83f);
+    for (const auto& face : m_mesh->faces) {
+        if (face.size() < 3) continue;
+
+        // Flat per-face normal via Newell's method - robust to a slightly
+        // non-planar or concave real-world face, unlike a plain 3-point
+        // cross product.
+        double nx = 0, ny = 0, nz = 0;
+        size_t n = face.size();
+        auto pointOf = [&](size_t i) -> const dxx::Point3D* {
+            int idx = face[i];
+            if (idx < 0 || static_cast<size_t>(idx) >= m_mesh->vertices.size()) return nullptr;
+            return &m_mesh->vertices[static_cast<size_t>(idx)];
+        };
+        for (size_t i = 0; i < n; ++i) {
+            const dxx::Point3D* a = pointOf(i);
+            const dxx::Point3D* b = pointOf((i + 1) % n);
+            if (!a || !b) continue;
+            nx += (a->y - b->y) * (a->z + b->z);
+            ny += (a->z - b->z) * (a->x + b->x);
+            nz += (a->x - b->x) * (a->y + b->y);
+        }
+        double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+        if (len > 1e-12) { nx /= len; ny /= len; nz /= len; }
+
+        glNormal3d(nx, ny, nz);
+        glBegin(GL_POLYGON);
+        for (size_t i = 0; i < n; ++i) {
+            const dxx::Point3D* p = pointOf(i);
+            if (p) glVertex3d(p->x, p->y, p->z);
+        }
+        glEnd();
+    }
+
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_LIGHT0);
+    glDisable(GL_COLOR_MATERIAL);
+}
+
+void FltkMeshWidget::drawWireframeEdges()
+{
     glColor3f(0.10f, 0.35f, 0.65f);
     for (const auto& face : m_mesh->faces) {
         glBegin(GL_LINE_LOOP);
@@ -118,10 +204,35 @@ void FltkMeshWidget::draw()
     }
 }
 
+void FltkMeshWidget::drawHint()
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, w(), 0, h(), -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);
+
+    char hint[96];
+    std::snprintf(hint, sizeof(hint), "P: %s view   S: shading %s",
+                  m_perspective ? "perspective" : "orthographic",
+                  m_shaded ? "on" : "off");
+    gl_color(FL_DARK3);
+    gl_font(FL_HELVETICA, 10);
+    gl_draw(hint, 6, 6);
+
+    glEnable(GL_DEPTH_TEST);
+}
+
 int FltkMeshWidget::handle(int event)
 {
     switch (event) {
+    case FL_FOCUS:
+    case FL_UNFOCUS:
+        return 1; // accept keyboard focus so P/S below can be reached
+
     case FL_PUSH:
+        Fl::focus(this);
         if (Fl::event_button() == FL_LEFT_MOUSE && Fl::event_clicks()) {
             resetView();
             redraw();
@@ -155,6 +266,13 @@ int FltkMeshWidget::handle(int event)
         m_zoom = std::clamp(m_zoom * std::pow(1.0015, -Fl::event_dy() * 120.0), 0.05, 50.0);
         redraw();
         return 1;
+
+    case FL_KEYDOWN: {
+        int key = Fl::event_key();
+        if (key == 'p' || key == 'P') { m_perspective = !m_perspective; redraw(); return 1; }
+        if (key == 's' || key == 'S') { m_shaded = !m_shaded; redraw(); return 1; }
+        return 0;
+    }
 
     default:
         return Fl_Gl_Window::handle(event);

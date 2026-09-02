@@ -92,15 +92,29 @@ only used when no argument is passed.) A Visual Studio project
   - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with
     **Cairo** (anti-aliased) into an image surface, blitted via `fl_draw_image`;
     pan/zoom + dimension annotations.
-  - `FltkMeshWidget` (`Fl_Gl_Window`) — 3D wireframe preview of a `MeshBody`
-    (fixed-function/legacy OpenGL - `glBegin(GL_LINE_LOOP)` per face, no
-    shading/lighting/hidden-line removal); orbit via left-drag, zoom via wheel,
-    double-click to reset, mirroring the 2D widget's interaction vocabulary.
+  - `FltkMeshWidget` (`Fl_Gl_Window`) — 3D preview of a `MeshBody` (fixed-
+    function/legacy OpenGL, no textures/hidden-line-removal beyond the depth
+    buffer); orbit via left-drag, zoom via wheel, double-click to reset,
+    mirroring the 2D widget's interaction vocabulary. Two independent view
+    toggles, both defaulted on, `P`/`S` keys (click the view first for
+    keyboard focus - `FL_FOCUS`/`FL_UNFOCUS` accepted, `Fl::focus(this)`
+    called on `FL_PUSH`), current state hinted bottom-left every frame:
+    - **Perspective vs. orthographic** (`m_perspective`) — `setupProjection()`
+      picks `gluPerspective` (camera pushed back from the object by a
+      zoom-scaled `glTranslated` in `draw()`, before the existing
+      rotate-around-center transform) or the original `glOrtho`.
+    - **Shaded vs. wireframe-only** (`m_shaded`) — `drawShadedFaces()` renders
+      each face as a `GL_POLYGON` with a flat per-face normal (Newell's
+      method - tolerant of a slightly non-planar or concave real-world face,
+      unlike a plain 3-point cross product) under one directional light
+      (`GL_LIGHTING`/`GL_LIGHT0`, two-sided), offset back via
+      `GL_POLYGON_OFFSET_FILL` so `drawWireframeEdges()` - always drawn,
+      regardless of this toggle - stays z-fight-free on top of it.
     Antialiased via `FL_MULTISAMPLE` (requests a multisample-capable pixel
     format; the mode flag alone doesn't turn sampling on, so `draw()` also
     calls `glEnable(GL_MULTISAMPLE)` - manually `#define`d, since Windows'
     OpenGL 1.1 header predates it - plus `GL_LINE_SMOOTH` with alpha blending
-    for the lines' own edge coverage antialiasing) - falls back to
+    for the wireframe's own line edge coverage antialiasing) - falls back to
     non-multisampled silently if the driver has no such pixel format. Being an
     `Fl_Gl_Window` makes it a real native child window, not a plain widget
     drawn into the parent surface like `FltkGeometryWidget` - see the gotcha
