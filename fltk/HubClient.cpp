@@ -412,4 +412,65 @@ void HubClient::run() {
     WSACleanup();
 }
 
+bool PublishToHub(const std::string& host, unsigned short port,
+                    const std::string& topic, const std::string& jsonData) {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return false;
+
+    bool ok = false;
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock != INVALID_SOCKET) {
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+        DWORD timeout = 3000; // one-shot, so a generous flat timeout rather
+                               // than HubClient::run()'s tight polling one
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
+        ok = connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
+
+        if (ok) {
+            std::string key = makeWebSocketKey();
+            std::string request =
+                "GET /ws HTTP/1.1\r\n"
+                "Host: " + host + ":" + std::to_string(port) + "\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "Sec-WebSocket-Key: " + key + "\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "\r\n";
+            ok = sendAll(sock, request.data(), request.size());
+        }
+
+        if (ok) {
+            std::atomic<bool> noStop{false};
+            std::string headerBuf;
+            bool headerDone = false;
+            while (!headerDone) {
+                char c = 0;
+                if (!recvExact(sock, &c, 1, noStop)) { ok = false; break; }
+                headerBuf += c;
+                if (headerBuf.size() >= 4 &&
+                    headerBuf.compare(headerBuf.size() - 4, 4, "\r\n\r\n") == 0)
+                    headerDone = true;
+            }
+            ok = ok && headerDone && headerBuf.compare(0, 9, "HTTP/1.1 ") == 0
+                     && headerBuf.compare(9, 3, "101") == 0;
+        }
+
+        if (ok) {
+            std::string publish =
+                "{\"id\":\"1\",\"command\":\"publish\",\"topic\":\"" + topic + "\",\"data\":" + jsonData + "}";
+            sendFrame(sock, 0x1, publish);
+        }
+
+        closesocket(sock);
+    }
+
+    WSACleanup();
+    return ok;
+}
+
 } // namespace dxxviewer

@@ -44,10 +44,10 @@ const int kToolbarH = 32;
 // are separate repos with no shared header; keep the two in sync by hand if
 // this ever changes.
 const ULONG_PTR kAutoCadCommandMsgId = 0x4443584Aul; // 'DCXJ', just a tag
-// Same idea, different tag: a curve-geometry payload (see
-// sendGeometryToHost()) rather than a plain command string. Defined
-// independently on HsbChatPanelPoc's side too (kDxxGeometryMsgId there).
-const ULONG_PTR kAutoCadGeometryMsgId = 0x4447584Aul; // 'DGXJ', just a tag
+// Curve geometry no longer travels this way - see sendGeometryToHost(),
+// which now publishes over hsbWebSocketHub's "acad_geometry" topic instead
+// (ChatDockPane's own kDxxGeometryMsgId/WM_COPYDATA handling for it is
+// unaffected but no longer fed by this project).
 
 // Looks up the HWND this window is currently reparented into (HsbChatPanelPoc's
 // ChatDockPane, if launched via its "Geometry" button). Returns NULL - after
@@ -86,60 +86,77 @@ void sendCommandToHost(Fl_Window* window, const char* text)
     ::SendMessage(hParent, WM_COPYDATA, reinterpret_cast<WPARAM>(hSelf), reinterpret_cast<LPARAM>(&cds));
 }
 
-// Sends `node`'s curve geometry (world-space, already tessellated - one line
-// per curve, each point "x,y,z", points space-separated) to the host ARX app
-// via WM_COPYDATA, tagged kAutoCadGeometryMsgId so the receiver can tell this
-// apart from a plain command string. No-op (status dialog) if `node` has no
-// curves under it, or if not currently embedded.
-void sendGeometryToHost(Fl_Window* window, const dxx::DxxNode* node)
+// hsbWebSocketHub host/port - same hub m_hub/m_elementCommandsHub connect to
+// further down in this file, moved up here so sendGeometryToHost (which
+// needs them) doesn't have to wait for those later declarations.
+const char* kHubHost = "127.0.0.1";
+const unsigned short kHubPort = 8181;
+// Third topic on that hub, for "Draw in AutoCAD" (see HsbChatPanelPoc's
+// ChatDockPane.cpp: kGeometryTopic / OnAcadGeometryMessage /
+// HubProtocol.cpp's extractPointsLine, which expects exactly the
+// {"points":[[x,y,z],...]} shape built below).
+const char* kGeometryTopic = "acad_geometry";
+
+// Publishes `node`'s curve geometry (world-space, already tessellated) to
+// hsbWebSocketHub's "acad_geometry" topic, one publish per curve (each as
+// {"points":[[x,y,z],...]}) - the WebSocket equivalent of this function's
+// original WM_COPYDATA implementation. Deliberately NOT WM_COPYDATA: a hub
+// publish works whether this window is embedded in HsbChatPanelPoc or
+// running fully standalone, unlike the old GetParent()-based check. Shows a
+// status dialog on "nothing selected"/"no curve geometry"/publish failure,
+// UNLESS silentOnFailure (used by the auto-draw-on-selection call below, so
+// browsing the tree with no hub running doesn't pop a dialog on every click -
+// same reasoning that already made the "no curve geometry" case silent for
+// that caller specifically).
+void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
 {
     if (!node) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message("Nothing selected.");
+        if (!silentOnFailure) {
+            fl_message_title("Draw in AutoCAD");
+            fl_message("Nothing selected.");
+        }
         return;
     }
     std::vector<dxx::Curve> curves = dxx::extractCurves3D(*node);
     if (curves.empty()) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message("No curve geometry in the current selection.");
+        if (!silentOnFailure) {
+            fl_message_title("Draw in AutoCAD");
+            fl_message("No curve geometry in the current selection.");
+        }
         return;
     }
 
-    HWND hSelf = fl_xid(window);
-    HWND hParent = findHostOrWarn(window);
-    if (NULL == hParent)
-        return;
-
-    std::wstring payload;
+    bool anySent = false;
+    bool anyPublishFailed = false;
     for (const dxx::Curve& curve : curves) {
         std::vector<dxx::Point3D> pts = dxx::tessellateCurveWorld(curve);
         if (pts.size() < 2)
             continue;
-        if (!payload.empty())
-            payload += L'\n';
+
+        std::string data = "{\"points\":[";
         for (size_t i = 0; i < pts.size(); ++i) {
             if (i > 0)
-                payload += L' ';
-            wchar_t buf[96];
-            swprintf_s(buf, L"%g,%g,%g", pts[i].x, pts[i].y, pts[i].z);
-            payload += buf;
+                data += ",";
+            char buf[96];
+            snprintf(buf, sizeof(buf), "[%g,%g,%g]", pts[i].x, pts[i].y, pts[i].z);
+            data += buf;
         }
-    }
-    if (payload.empty()) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message("No curve geometry in the current selection.");
-        return;
+        data += "]}";
+
+        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
+            anySent = true;
+        else
+            anyPublishFailed = true;
     }
 
-    COPYDATASTRUCT cds = {};
-    cds.dwData = kAutoCadGeometryMsgId;
-    cds.cbData = static_cast<DWORD>((payload.size() + 1) * sizeof(wchar_t));
-    cds.lpData = const_cast<wchar_t*>(payload.c_str());
-    ::SendMessage(hParent, WM_COPYDATA, reinterpret_cast<WPARAM>(hSelf), reinterpret_cast<LPARAM>(&cds));
+    if (!anySent && !silentOnFailure) {
+        fl_message_title("Draw in AutoCAD");
+        fl_message(anyPublishFailed
+            ? "Failed to publish curve to the AutoCAD hub (is hsbWebSocketHub running?)."
+            : "No curve geometry in the current selection.");
+    }
 }
 
-const char* kHubHost = "127.0.0.1";
-const unsigned short kHubPort = 8181;
 const char* kHubTopic = "map";
 const char* kElementCommandsTopic = "element_commands";
 const char* kAppVersion = "1.0.0";
@@ -303,9 +320,9 @@ void FltkMainWindow::buildLayout()
     m_autocadCmdEdit->when(FL_WHEN_ENTER_KEY);
     m_autocadCmdEdit->callback(btnSendToAcad->callback(), this);
 
-    btnDraw->callback([](Fl_Widget* w, void* data) {
+    btnDraw->callback([](Fl_Widget*, void* data) {
         auto* self = static_cast<FltkMainWindow*>(data);
-        sendGeometryToHost(w->window(), self->m_selectedNode);
+        sendGeometryToHost(self->m_selectedNode);
     }, this);
 }
 
@@ -437,8 +454,12 @@ void FltkMainWindow::onNodeSelected(const dxx::DxxNode* node)
     // outright) is what keeps this silent for an empty CURVE node instead of
     // popping its "No curve geometry" dialog on every such tree click - that
     // dialog makes sense for a deliberate Draw click, not an automatic one.
+    // silentOnFailure=true for the same reason: browsing the tree with no
+    // hub running (a legitimate standalone-dev scenario now that this no
+    // longer needs HsbChatPanelPoc's embedding) shouldn't pop a dialog on
+    // every single CURVE click either.
     if (node && node->name == "CURVE" && !dxx::extractCurves3D(*node).empty())
-        sendGeometryToHost(window(), node);
+        sendGeometryToHost(node, /*silentOnFailure=*/true);
 }
 
 void FltkMainWindow::doSearch()

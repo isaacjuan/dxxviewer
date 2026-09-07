@@ -31,8 +31,9 @@ class HubClient;
 // tree/properties panels. The toolbar's "-> AutoCAD" input/button send an
 // arbitrary command string back to a host ARX app via WM_COPYDATA, when this
 // window has been reparented into one (see m_autocadCmdEdit). The "Draw"
-// button sends the currently selected node's curve geometry the same way
-// (see m_selectedNode / sendGeometryToHost in the .cpp).
+// button sends the currently selected node's curve geometry over the hub
+// instead (see m_selectedNode / sendGeometryToHost in the .cpp) - no
+// reparenting needed for that one.
 
 class FltkMainWindow : public Fl_Group {
 public:

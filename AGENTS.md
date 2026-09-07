@@ -108,15 +108,31 @@ only used when no argument is passed.) A Visual Studio project
     window then, so it just shows a status message). See that project's
     `ChatDockPane::OnCopyData`/`kDxxCommandMsgId` for the receiving side.
     A `"Draw"` button next to it sends the *currently selected* node's curve
-    geometry the same way (`sendGeometryToHost`, tag `kAutoCadGeometryMsgId`):
-    `dxx::extractCurves3D` + `dxx::tessellateCurveWorld` per curve (both
-    pre-existing - no new geometry math), serialized as one line per curve of
-    space-separated `x,y,z` points. `FltkMainWindow::m_selectedNode` tracks
-    the selection (set in `onNodeSelected`) so the button always draws
-    whatever is selected *right now*. Receiving side draws plain `AcDbLine`
-    segments (`ChatDockPane::drawWorldPolylines`), not `AcDbPolyline` -
-    deliberately, since an arbitrarily-oriented curve's own basis doesn't
-    generally match the OCS `AcDbPolyline` would derive from its normal.
+    geometry: `dxx::extractCurves3D` + `dxx::tessellateCurveWorld` per curve
+    (both pre-existing - no new geometry math). `FltkMainWindow::m_selectedNode`
+    tracks the selection (set in `onNodeSelected`) so the button always draws
+    whatever is selected *right now*.
+    **Draw now publishes over the hub, not `WM_COPYDATA` (2026-09-07)**:
+    `sendGeometryToHost` (`FltkMainWindow.cpp`) was rewritten to publish
+    `{"points":[[x,y,z],...]}` - one publish per curve - to
+    `hsbWebSocketHub`'s `"acad_geometry"` topic instead of sending
+    `WM_COPYDATA` to this window's Win32 parent, per the same request that
+    drove the equivalent change in `hsbMapExplorerWs`'s own
+    `AutoCadBridge.cs` (see that fork's `CLAUDE.md`). `HubClient` gained a
+    `PublishToHub(host, port, topic, jsonData)` free function
+    (`HubClient.h/.cpp`) for this - a one-shot connect/handshake/send/close,
+    reusing the same hand-rolled Winsock2 WS framing helpers (`sendFrame`,
+    `sendAll`, `recvExact`, `makeWebSocketKey`) `HubClient::run()`'s own
+    persistent subscribe loop already has, rather than a second WS
+    implementation. Old `dwData`/`kAutoCadGeometryMsgId`/`GetParent()`
+    plumbing removed entirely (not kept as a fallback) - a hub publish works
+    identically whether this window is embedded in `HsbChatPanelPoc` or
+    running fully standalone; `ChatDockPane` already had a third
+    `HsbWsBridge` connection subscribed to exactly this topic (see that
+    project's `kGeometryTopic`/`OnAcadGeometryMessage`), so nothing on the
+    receiving side needed to change. `"-> AutoCAD"`'s own `WM_COPYDATA`
+    channel (`sendCommandToHost`/`kAutoCadCommandMsgId`) is untouched - only
+    curve-drawing moved to the hub.
     **Auto-draw on selection (2026-09-07)**: `onNodeSelected` also calls
     `sendGeometryToHost` itself, not just the `"Draw"` button - whenever the
     newly-selected node's own `name == "CURVE"` and
@@ -129,10 +145,25 @@ only used when no argument is passed.) A Visual Studio project
     rather than just calling `sendGeometryToHost` unconditionally: that
     function pops a "No curve geometry" dialog when it finds none, which is
     fine for a deliberate button click but would be an annoying no-op dialog
-    on every empty-`CURVE` tree click if it fired automatically. The `"Draw"`
-    button itself still works unchanged for redrawing the current selection
-    on demand (e.g. after the receiving side's `ChatDockPane` document
-    changed).
+    on every empty-`CURVE` tree click if it fired automatically. This call
+    also passes `silentOnFailure=true` (a parameter the button click leaves
+    `false`) so a failed hub publish - e.g. running standalone with no hub up,
+    a real scenario now that this no longer needs `HsbChatPanelPoc`'s
+    embedding - doesn't pop a dialog on every single `CURVE` tree click
+    either. The `"Draw"` button itself still works unchanged for redrawing
+    the current selection on demand (e.g. after the receiving side's
+    `ChatDockPane` document changed).
+
+    **Verified working end-to-end**: subscribed to `acad_geometry` via
+    `wsget`, published a synthetic `selection_parameters` message (one
+    element, one `CURVE` map entry as `PLine((0,0,1),
+    Point3dCollection[3]{(0,0,0),(10,0,0),(10,10,0)},
+    DoubleCollection[3]{0,0,0})`) via `sendws --topic element_commands`,
+    and confirmed the `CURVE` leaf auto-selected, auto-drew, and `wsget`
+    received `{"points":[[0,0,0],[10,0,0],[10,10,0],[0,0,0]]}` (the closing
+    point back to the origin comes from `tessellateCurveWorld` itself,
+    unchanged - not something this change affects) - process stayed alive
+    throughout, running fully standalone (no `HsbChatPanelPoc` host).
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
   - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with

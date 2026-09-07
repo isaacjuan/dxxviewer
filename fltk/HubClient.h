@@ -59,4 +59,15 @@ private:
     std::thread m_thread;
 };
 
+// One-shot publish: connects, completes the WS handshake, sends a
+// {"command":"publish","topic":...,"data":<jsonData>} envelope as a single
+// text frame, then disconnects - no persistent subscribe/receive loop, since
+// a publish is one-way (used by "Draw in AutoCAD" to send curve geometry to
+// hsbWebSocketHub's "acad_geometry" topic instead of WM_COPYDATA - see
+// FltkMainWindow.cpp's sendGeometryToHost). Blocking; returns true only if
+// the connect+handshake+send all succeeded (does not wait for or verify the
+// hub's own publish ack).
+bool PublishToHub(const std::string& host, unsigned short port,
+                    const std::string& topic, const std::string& jsonData);
+
 } // namespace dxxviewer
