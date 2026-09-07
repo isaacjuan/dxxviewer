@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
     // deliver received maps to the GUI via Fl::awake().
     Fl::lock();
 
-    Fl::scheme("oxy");
+    Fl::scheme("gtk+");
     Fl::get_system_colors();
     Fl::set_font(FL_HELVETICA, "Segoe UI");
     Fl::set_font(FL_HELVETICA_BOLD, "Segoe UI Bold");

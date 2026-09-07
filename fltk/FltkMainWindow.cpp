@@ -36,7 +36,16 @@ const char* kFindLabel = "Find";
 const char* kClearLabel = "X";
 const char* kSendToAcadLabel = "-> AutoCAD";
 const char* kDrawLabel = "Draw";
-const int kToolbarH = 32;
+// Two stacked rows, not one - at a narrow width (e.g. ~850px, this app's
+// own docked-panel target inside HsbChatPanelPoc) one row's worth of fixed-
+// width buttons (Open/Reload/.../Draw, ~715px) left the search box only a
+// few pixels and clipped the AutoCAD command box/"-> AutoCAD"/"Draw"
+// buttons off the right edge entirely - confirmed visually, not a guess.
+// kToolbarH (both rows together) is what every content-area calculation in
+// this file already keys off, so splitting the row doesn't need those
+// call sites to change, only the toolbar's own construction below.
+const int kToolbarRowH = 32;
+const int kToolbarH = kToolbarRowH * 2;
 
 // Arbitrary but fixed magic value identifying our WM_COPYDATA messages to a
 // host ARX app. Defined independently on both sides - this project
@@ -300,9 +309,16 @@ FltkMainWindow::~FltkMainWindow() = default;
 void FltkMainWindow::resize(int x, int y, int w, int h)
 {
     Fl_Group::resize(x, y, w, h);
-    // Keep the floating toolbar pinned to the top edge at a fixed height.
-    if (m_toolbar)
-        m_toolbar->resize(x, y, w, kToolbarH);
+    // Keep the two floating toolbar rows pinned to the top edge at their
+    // own fixed heights - two independent sibling Fl_Flex rows (not one
+    // nested inside an outer Fl_Flex::COLUMN - simpler to reason about, and
+    // reuses the exact single-row construction/resize shape this file
+    // already had before there were two rows, rather than introducing a
+    // new nested-Fl_Flex shape untested elsewhere in this project).
+    if (m_toolbarRow1)
+        m_toolbarRow1->resize(x, y, w, kToolbarRowH);
+    if (m_toolbarRow2)
+        m_toolbarRow2->resize(x, y + kToolbarRowH, w, kToolbarRowH);
 }
 
 void FltkMainWindow::buildLayout()
@@ -349,9 +365,17 @@ void FltkMainWindow::buildLayout()
     content->resizable(m_geomHost);
     resizable(content);
 
-    // ── Toolbar row (floats on top of the tile's empty top strip) ───────────
-    m_toolbar = new Fl_Flex(0, 0, w(), kToolbarH, Fl_Flex::ROW);
-    m_toolbar->gap(6);
+    // ── Toolbar (floats on top of the tile's empty top strip) ───────────────
+    // Two stacked rows (see kToolbarH's own comment on why), as two
+    // independent sibling Fl_Flex widgets rather than one nested inside an
+    // outer Fl_Flex::COLUMN - simpler to reason about, and reuses the exact
+    // single-row construction shape this file's own original one-row
+    // toolbar already used, rather than introducing a new nested-Fl_Flex
+    // shape untested elsewhere in this project. Row 1 is document/tree
+    // browsing (Open/Reload/Expand/Collapse/search), row 2 is the AutoCAD
+    // interop controls (command box/"-> AutoCAD"/"Draw").
+    m_toolbarRow1 = new Fl_Flex(0, 0, w(), kToolbarRowH, Fl_Flex::ROW);
+    m_toolbarRow1->gap(6);
 
     Fl_Button* btnOpen = new Fl_Button(0, 0, 0, 0, kOpenLabel);
     Fl_Button* btnReload = new Fl_Button(0, 0, 0, 0, kReloadLabel);
@@ -363,6 +387,18 @@ void FltkMainWindow::buildLayout()
     Fl_Button* btnFind = new Fl_Button(0, 0, 0, 0, kFindLabel);
     Fl_Button* btnClear = new Fl_Button(0, 0, 0, 0, kClearLabel);
 
+    m_toolbarRow1->fixed(btnOpen, 70);
+    m_toolbarRow1->fixed(btnReload, 70);
+    m_toolbarRow1->fixed(btnExpand, 90);
+    m_toolbarRow1->fixed(btnCollapse, 95);
+    m_toolbarRow1->fixed(btnFind, 60);
+    m_toolbarRow1->fixed(btnClear, 40);
+    // search edit absorbs remaining width
+    m_toolbarRow1->end();
+
+    m_toolbarRow2 = new Fl_Flex(0, kToolbarRowH, w(), kToolbarRowH, Fl_Flex::ROW);
+    m_toolbarRow2->gap(6);
+
     m_autocadCmdEdit = new Fl_Input(0, 0, 0, 0);
     m_autocadCmdEdit->tooltip("Command to send to the host ARX app (e.g. ATHELLO)");
     Fl_Button* btnSendToAcad = new Fl_Button(0, 0, 0, 0, kSendToAcadLabel);
@@ -370,17 +406,12 @@ void FltkMainWindow::buildLayout()
     Fl_Button* btnDraw = new Fl_Button(0, 0, 0, 0, kDrawLabel);
     btnDraw->tooltip("Draw the selected node's curve geometry in AutoCAD");
 
-    m_toolbar->fixed(btnOpen, 70);
-    m_toolbar->fixed(btnReload, 70);
-    m_toolbar->fixed(btnExpand, 90);
-    m_toolbar->fixed(btnCollapse, 95);
-    m_toolbar->fixed(btnFind, 60);
-    m_toolbar->fixed(btnClear, 40);
-    m_toolbar->fixed(m_autocadCmdEdit, 140);
-    m_toolbar->fixed(btnSendToAcad, 90);
-    m_toolbar->fixed(btnDraw, 60);
-    // search edit absorbs remaining width
-    m_toolbar->end();
+    m_toolbarRow2->fixed(btnSendToAcad, 90);
+    m_toolbarRow2->fixed(btnDraw, 60);
+    // AutoCAD command edit absorbs remaining width - previously fixed at a
+    // cramped 140px; now that it's not squeezed onto the same row as every
+    // tree-browsing button, there's no reason not to let it use the space.
+    m_toolbarRow2->end();
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     btnOpen->callback([](Fl_Widget*, void* data) {

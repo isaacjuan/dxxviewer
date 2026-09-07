@@ -64,7 +64,10 @@ private:
     Fl_Group*            m_geomHost = nullptr;
     FltkGeometryWidget*  m_geom = nullptr;
     FltkMeshWidget*      m_mesh = nullptr;
-    Fl_Flex*             m_toolbar = nullptr;
+    // Two independent, sibling Fl_Flex rows (not one nested inside the
+    // other) - see resize()'s own comment for why not nested.
+    Fl_Flex*             m_toolbarRow1 = nullptr;
+    Fl_Flex*             m_toolbarRow2 = nullptr;
     Fl_Input*            m_searchEdit = nullptr;
     // Sends whatever text is typed here to the host ARX app (HsbChatPanelPoc,
     // D:\dev_jp\HsbChatPanelPoc) via WM_COPYDATA, IF this window is currently

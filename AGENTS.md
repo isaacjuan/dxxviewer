@@ -405,6 +405,29 @@ only used when no argument is passed.) A Visual Studio project
   `m_geomHost->redraw()` after every visibility toggle to force the newly-
   revealed widget to repaint; without it the previous widget's last frame can
   stay visible on top after switching selection.
+- **Toolbar is two stacked `Fl_Flex` rows, not one (2026-09-07)** - at a
+  narrow width (this app's own docked-panel target inside
+  `HsbChatPanelPoc`, ~850px), one row's worth of fixed-width buttons
+  (`Open`/`Reload`/.../`Draw`, ~715px) left the search box only a few
+  pixels and clipped the AutoCAD command box/`"-> AutoCAD"`/`"Draw"`
+  buttons off the right edge entirely - a real, confirmed bug (simple
+  arithmetic: total fixed-button width exceeds the available window
+  width). Split into two independent sibling `Fl_Flex` rows (row 1:
+  document/tree browsing; row 2: AutoCAD interop) - see `kToolbarH`'s own
+  comment in `FltkMainWindow.cpp`.
+  **Screenshot-based visual verification is unreliable in this dev
+  environment for more than just click targeting** (the DPI-scaling
+  mismatch already noted elsewhere in this file for simulated clicks) -
+  while diagnosing this fix, a `Fl_Button` placed correctly per hand-
+  verified `Fl_Flex::layout()` math (confirmed via debug prints of its
+  actual `x()/y()/w()/h()` after the event loop settled) simply did not
+  render in `CopyFromScreen` captures, on this machine, in *both* the
+  full app and a from-scratch minimal repro - yet clicking at that exact
+  computed position correctly triggered the button's own callback every
+  time. Trust computed coordinates + click-response side effects (a
+  callback firing, a window title changing) over pixel screenshots when
+  verifying FLTK layout changes here; a screenshot showing something
+  "missing" is not proof it isn't there and functional.
 
 ## DXX file format
 
