@@ -97,6 +97,22 @@ const unsigned short kHubPort = 8181;
 // {"points":[[x,y,z],...]} shape built below).
 const char* kGeometryTopic = "acad_geometry";
 
+// Builds "[x,y,z],[x,y,z],..." (no enclosing brackets) from `points` - the
+// inner-tuple-list fragment shared by sendGeometryToHost's own "points"
+// array and sendMeshToHost's own per-face "curve" arrays.
+std::string joinPointsAsJsonTuples(const std::vector<dxx::Point3D>& points)
+{
+    std::string out;
+    for (size_t i = 0; i < points.size(); ++i) {
+        if (i > 0)
+            out += ",";
+        char buf[96];
+        snprintf(buf, sizeof(buf), "[%g,%g,%g]", points[i].x, points[i].y, points[i].z);
+        out += buf;
+    }
+    return out;
+}
+
 // Publishes `node`'s curve geometry (world-space, already tessellated) to
 // hsbWebSocketHub's "acad_geometry" topic, one publish per curve (each as
 // {"points":[[x,y,z],...]}) - the WebSocket equivalent of this function's
@@ -133,15 +149,7 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
         if (pts.size() < 2)
             continue;
 
-        std::string data = "{\"points\":[";
-        for (size_t i = 0; i < pts.size(); ++i) {
-            if (i > 0)
-                data += ",";
-            char buf[96];
-            snprintf(buf, sizeof(buf), "[%g,%g,%g]", pts[i].x, pts[i].y, pts[i].z);
-            data += buf;
-        }
-        data += "]}";
+        std::string data = "{\"points\":[" + joinPointsAsJsonTuples(pts) + "]}";
 
         if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
             anySent = true;
@@ -203,24 +211,19 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
         if (loop.size() < 2)
             continue;
 
-        std::string curve = "[";
+        std::vector<dxx::Point3D> facePoints;
+        facePoints.reserve(loop.size());
         bool validIndices = true;
-        for (size_t i = 0; i < loop.size() && validIndices; ++i) {
-            int idx = loop[i];
+        for (int idx : loop) {
             if (idx < 0 || static_cast<size_t>(idx) >= mesh.vertices.size()) {
                 validIndices = false;
                 break;
             }
-            const dxx::Point3D& pt = mesh.vertices[static_cast<size_t>(idx)];
-            if (i > 0)
-                curve += ",";
-            char buf[96];
-            snprintf(buf, sizeof(buf), "[%g,%g,%g]", pt.x, pt.y, pt.z);
-            curve += buf;
+            facePoints.push_back(mesh.vertices[static_cast<size_t>(idx)]);
         }
-        curve += "]";
         if (!validIndices)
             continue;
+        std::string curve = "[" + joinPointsAsJsonTuples(facePoints) + "]";
 
         if (anyFace)
             data += ",";
