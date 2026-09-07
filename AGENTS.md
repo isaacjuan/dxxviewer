@@ -18,6 +18,17 @@ cmd /c build.bat
 Produces `fltk\build\dxxviewer-fltk.exe` plus the Cairo runtime DLLs it copies
 next to the exe. Run with an optional path: `dxxviewer-fltk.exe file.dxx`.
 
+**Known environment issue (found 2026-09-03, not yet fixed)**: `build.bat` calls
+plain `g++`, which on this machine currently resolves to a broken
+scoop-installed MinGW (`C:\Users\jissi\scoop\apps\mingw\...` ahead of
+`C:\msys64\mingw64\bin` on `PATH`) - its `crt2.o` fails to link anything
+(`undefined reference to '_gnu_exception_handler'`), unrelated to this
+project's own code (reproduces on a clean checkout too). Build with
+`C:\msys64\mingw64\bin\g++.exe` on `PATH` instead (already installed here for
+Cairo) until `PATH` ordering or the scoop install itself is fixed - `build.bat`
+itself hasn't been changed to hardcode a toolchain path, so this still needs
+doing manually per shell session until resolved at the environment level.
+
 Dependencies (absolute paths on this machine):
 - FLTK static libs: `C:\Users\jissi\fltk-install` (`lib\libfltk*.a`, `include\FL\*.H`),
   including `libfltk_gl.a`/`FL/Fl_Gl_Window.H` for the 3D mesh view — already
@@ -87,6 +98,41 @@ only used when no argument is passed.) A Visual Studio project
     widgets' node/mesh pointers so neither can dereference the document being
     replaced (a live "map" arriving repeatedly makes this much more likely to
     matter than the original one-document-per-session file-open flow).
+    Toolbar also has a small input + `"-> AutoCAD"` button
+    (`sendCommandToHost`, top of `FltkMainWindow.cpp`): sends the typed text
+    to this window's real Win32 parent via `WM_COPYDATA`, tagged with a magic
+    `dwData` value (`kAutoCadCommandMsgId`) that must match the receiving
+    side's own copy of the same constant. Only does anything when this window
+    has actually been reparented into a host - i.e. launched via
+    `D:\dev_jp\HsbChatPanelPoc`'s "Geometry" button, not standalone (no parent
+    window then, so it just shows a status message). See that project's
+    `ChatDockPane::OnCopyData`/`kDxxCommandMsgId` for the receiving side.
+    A `"Draw"` button next to it sends the *currently selected* node's curve
+    geometry the same way (`sendGeometryToHost`, tag `kAutoCadGeometryMsgId`):
+    `dxx::extractCurves3D` + `dxx::tessellateCurveWorld` per curve (both
+    pre-existing - no new geometry math), serialized as one line per curve of
+    space-separated `x,y,z` points. `FltkMainWindow::m_selectedNode` tracks
+    the selection (set in `onNodeSelected`) so the button always draws
+    whatever is selected *right now*. Receiving side draws plain `AcDbLine`
+    segments (`ChatDockPane::drawWorldPolylines`), not `AcDbPolyline` -
+    deliberately, since an arbitrarily-oriented curve's own basis doesn't
+    generally match the OCS `AcDbPolyline` would derive from its normal.
+    **Auto-draw on selection (2026-09-07)**: `onNodeSelected` also calls
+    `sendGeometryToHost` itself, not just the `"Draw"` button - whenever the
+    newly-selected node's own `name == "CURVE"` and
+    `dxx::extractCurves3D(*node)` is non-empty (i.e. it actually has point
+    data, not just an empty/malformed `CURVE` block). This covers a live
+    "map" broadcast's synthetic `CURVE` nodes too (see the
+    `element_commands`/`ElementCommandsBridge` section above), since those
+    are real DXX-native `CURVE` nodes by the time they reach the tree - no
+    separate wiring needed. Deliberately checks `extractCurves3D` up front
+    rather than just calling `sendGeometryToHost` unconditionally: that
+    function pops a "No curve geometry" dialog when it finds none, which is
+    fine for a deliberate button click but would be an annoying no-op dialog
+    on every empty-`CURVE` tree click if it fired automatically. The `"Draw"`
+    button itself still works unchanged for redrawing the current selection
+    on demand (e.g. after the receiving side's `ChatDockPane` document
+    changed).
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
   - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with
@@ -138,6 +184,73 @@ only used when no argument is passed.) A Visual Studio project
     second callback; `FltkMainWindow::updateTitle()` composes the title from
     app version + source + `[hub: connected|offline]` from that state.
     GUI-only: the CLI has no network code.
+  - **`element_commands` topic / live Revit selection (2026-09-03)** — a
+    SECOND `HubClient` instance (`FltkMainWindow::m_elementCommandsHub`, its
+    own connection - the hub relays broadcasts unwrapped with no topic tag,
+    so one connection can only unambiguously belong to one topic, same
+    reasoning as `hsbWebSocketRvt`'s own `TopicSubscription`) subscribes to
+    `element_commands`, published by the Revit add-in `hsbWebSocketRvt`
+    (`C:\HSBCAD\DEFAULT\beamapprevit\Phoenix\hsbWebSocketRvt`) - JSON, not DXX
+    text, pushed automatically whenever the Revit user's selection changes.
+    `HubClient` gained a second, raw-mode constructor overload for this (no
+    DXX `{filename,content_base64}`/bare-string shape detection - just the
+    unwrapped message text verbatim); the original `"map"`-topic
+    constructor/behavior is untouched.
+    `ElementCommandsBridge.h/.cpp` (uses vendored `third_party/json.hpp`,
+    nlohmann::json - this project had no JSON parser before) converts a
+    `selection_parameters` message into a synthetic `dxx::DxxDocument`
+    displayed through the SAME tree/properties panels a real `.dxx` file
+    uses, no new UI: root `"Selection"` → one `"Element <id>"` child per
+    selected entity (flattened Revit `parameters` as properties, plus
+    `<name> [storageType]`/`<name> [isReadOnly]` sibling properties) →
+    optional `"mapError"` property and/or a recursive `"Map"` child built
+    from the element's `map` JSON tree (nested objects → child nodes,
+    scalar/string/null leaves → properties on the current node). Wired into
+    `FltkMainWindow` via a shared `displayDocument()` helper also used by
+    `openFile`/`onMapReceived`; title shows `"Revit selection (N elements)"`
+    with its own `[elements: connected|offline]` badge.
+    **`CURVE` map entries get special-cased, not left as flat strings**: a
+    BeamRDB `"CURVE"` map value is Phoenix's own object `ToString()`, not DXX
+    text - `PLine(normal, Point3dCollection[n]{(x,y,z),...},
+    DoubleCollection[n]{bulge,...})`. `ElementCommandsBridge.cpp`'s
+    `parsePLine`/`buildCurveNode` parse this and emit a real DXX-native
+    `CURVE` node (`11PTX`/`11PTY`/`11PTZ`/`41BULGE` per point, in that exact
+    order - `dxx_parser.cpp`'s `collectCurves` finalizes a point on
+    `41BULGE`, plus `13NORMALX/Y/Z`) instead of a property, so the existing,
+    completely unmodified `dxx::extractProfile2D`/`extractCurves3D` pick it
+    up exactly like a real DXX file's `CURVE` node - no new geometry code.
+    Works with zero coordinate transform because `Point3dCollection`'s
+    points are already absolute world-space 3D (unlike DXX's own
+    local-plane-relative convention), and `collectCurves` already defaults
+    to an identity origin/basis (`{0,0,0}`/`{1,0,0}`/`{0,1,0}`) when no
+    ancestor sets `13PTORG*`/`13VECX*`/`13VECY*` - which none of these
+    synthetic nodes do. Verified against real sample payloads via a
+    throwaway scratch program (not committed): `extractProfile2D` (the
+    function `FltkGeometryWidget` actually calls) correctly projects a real
+    wall/panel outline onto its plane, producing a clean rectangle with Z
+    flattened to 0 as expected. Numeric tokens are kept as original text
+    (not round-tripped through `strtod`+reformat) to avoid a second,
+    unnecessary precision-loss point beyond `dxx_parser.cpp`'s own eventual
+    `strtod` read. Falls back to a flat string property if a `"CURVE"`
+    value doesn't parse as `PLine(...)`, so nothing is silently dropped.
+    **Bug found and fixed (2026-09-07)**: this node's `13NORMALX/Y/Z`
+    (the `PLine`'s own plane normal - genuinely needed by
+    `extractProfile2D`'s projection, so it can't just be omitted) was also
+    being picked up by `tessellateCurveWorld`'s final world-reconstruction
+    step (`origin + lx*vecX + ly*vecY + lz*normal`) - but this node's
+    points are already absolute (unlike a real DXX `CURVE`'s local-plane-
+    relative ones), so reapplying that normal there reprojected them through
+    the wrong basis, corrupting (flattening/skewing) anything not lying flat
+    in the XY plane. Confirmed via drawing a real 3D-coordinate `CURVE`
+    element through `HsbChatPanelPoc`'s new `acad_geometry` WS channel and
+    seeing it come out flattened in AutoCAD. Fixed in `tessellateCurveWorld`
+    itself (`dxx_parser.cpp`), not here: when a curve's origin/vecX/vecY are
+    still exactly `collectCurves`' identity defaults (true for these
+    synthetic nodes, since no ancestor sets `13PTORG*`/`13VECX*`/`13VECY*`),
+    the world-reconstruction normal is forced to identity `(0,0,1)` instead
+    of trusting `curve.normal` - safe for real DXX files too, since an
+    identity vecX/vecY frame geometrically requires a consistent normal to
+    already be `(0,0,1)`.
 - **CLI** (`main.cpp`) — parses and writes `preview.svg`.
 
 ## FLTK implementation gotchas

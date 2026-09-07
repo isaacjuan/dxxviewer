@@ -170,6 +170,20 @@ void collectCurves(const DxxNode& node, Curve& currentCurve,
     if (depth > dxx::kMaxNodeDepth) return;
     if (node.name == "CURVE") {
         currentCurve = Curve{};
+        // Identity defaults, matching what the ancestor-propagation step
+        // below would assign if this CURVE were reached by recursing down
+        // from a container node (the normal case for a real DXX file) -
+        // needed here too because extractCurves3D can be, and now is (see
+        // FltkMainWindow::onNodeSelected's auto-draw), called directly on a
+        // CURVE leaf, which returns immediately below without ever reaching
+        // that propagation code. Left at Vec3D's own zero default instead,
+        // vecX/vecY both being the zero vector collapses
+        // tessellateCurveWorld's world-reconstruction to "lz * normal" alone
+        // - confirmed the hard way: a live Revit CURVE drew as a single
+        // line at (pt.z, 0, 0) for every point, discarding X/Y entirely.
+        currentCurve.origin = {0, 0, 0};
+        currentCurve.vecX = {1, 0, 0};
+        currentCurve.vecY = {0, 1, 0};
         currentCurve.normal.x = node.getDouble("13NORMALX");
         currentCurve.normal.y = node.getDouble("13NORMALY");
         currentCurve.normal.z = node.getDouble("13NORMALZ");
@@ -324,8 +338,28 @@ std::vector<Point3D> tessellateCurveWorld(const Curve& curve, int stepsPerCircle
     std::vector<Point3D> out;
     if (curve.segments.size() < 2) return out;
 
-    Vec3D normal = normalized(curve.normal);
-    if (normal.x == 0 && normal.y == 0 && normal.z == 0)
+    // A curve whose origin/vecX/vecY are still exactly collectCurves' own
+    // identity defaults (no ancestor set 13PTORG*/13VECX*/13VECY*) has
+    // points that are already absolute world coordinates, not local-plane-
+    // relative ones - e.g. ElementCommandsBridge's synthetic CURVE nodes
+    // built from a Revit PLine's own Point3dCollection (see its own
+    // comment). In that case curve.normal (if set) is metadata for a
+    // different consumer (extractProfile2D's projection plane), not a valid
+    // world-reconstruction basis - reusing it in the origin + lx*vecX +
+    // ly*vecY + lz*normal transform below would reproject already-absolute
+    // points through the wrong basis, corrupting (typically flattening or
+    // skewing) anything not lying flat in the XY plane. Forcing identity
+    // normal here is a safe no-op for a real DXX curve that legitimately has
+    // this same identity vecX/vecY frame: vecX/vecY being exactly the world
+    // X/Y axes geometrically requires a correctly-set normal to already be
+    // (0,0,1) too, so nothing changes for that case.
+    bool identityFrame =
+        curve.origin.x == 0 && curve.origin.y == 0 && curve.origin.z == 0 &&
+        curve.vecX.x == 1 && curve.vecX.y == 0 && curve.vecX.z == 0 &&
+        curve.vecY.x == 0 && curve.vecY.y == 1 && curve.vecY.z == 0;
+
+    Vec3D normal = identityFrame ? Vec3D{0, 0, 1} : normalized(curve.normal);
+    if (!identityFrame && normal.x == 0 && normal.y == 0 && normal.z == 0)
         normal = normalized(crossProduct(curve.vecX, curve.vecY));
 
     auto toWorld = [&](double lx, double ly, double lz) -> Point3D {
