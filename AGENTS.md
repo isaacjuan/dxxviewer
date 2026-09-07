@@ -167,26 +167,22 @@ only used when no argument is passed.) A Visual Studio project
 
     **Mesh selections (e.g. a `MassElement`/`SimpleBody`) draw too
     (2026-09-07)** - `sendMeshToHost` publishes a mesh's faces to the SAME
-    `"acad_geometry"` topic/wire shape curves already use
-    (`{"points":[[x,y,z],...]}`), one publish per face - a
-    wireframe-per-face representation via the already-working
-    `AcDb3dPolyline`/`DrawWorldPolylines` pipeline, **not** a real
-    solid/mesh AutoCAD entity. That was the first attempt (an
-    `AcDbSubDMesh`, ObjectARX's modern mesh entity), abandoned after a real
-    SDK/linkage dead end: `AcDbPolyFaceMesh` has no header at all in the
-    installed ObjectARX 2026 SDK, and `AcDbSubDMesh` (`dbSubD.h`) has a
+    `"acad_geometry"` topic curves already use, as a wireframe-per-face
+    representation via the already-working `AcDb3dPolyline` pipeline,
+    **not** a real solid/mesh AutoCAD entity. That was the first attempt
+    (an `AcDbSubDMesh`, ObjectARX's modern mesh entity), abandoned after a
+    real SDK/linkage dead end: `AcDbPolyFaceMesh` has no header at all in
+    the installed ObjectARX 2026 SDK, and `AcDbSubDMesh` (`dbSubD.h`) has a
     header but its constructor/`setSubDMesh` aren't exported by *any* DLL
     in the installed AutoCAD 2026 - confirmed via `dumpbin /exports`
     recursively across the entire install tree, not just `acdb25.dll`/
     `accore.dll` (`HsbChatPanelPoc`'s own attempt at wiring this up hit a
     `LNK2019` on exactly these symbols; reverted rather than left half-
-    working). A wireframe-per-face polyline set needs zero new
-    `HsbChatPanelPoc`-side code at all - the existing "acad_geometry"
-    channel already draws it.
+    working).
 
     `dxx::MeshBody::faces` (0-based indices into `mesh.vertices`) sometimes
     repeats its first index at the end, explicitly closing the loop (e.g.
-    `0,1,2,3,0`) - stripped before publishing, since `DrawWorldPolylines`'s
+    `0,1,2,3,0`) - stripped before publishing, since the receiving side's
     `AcDb3dPolyline` already closes the loop itself (same convention every
     curve published this way already uses). An *internal* repeated index (a
     self-touching/bridged boundary - e.g. an L-shaped or multiply-connected
@@ -209,6 +205,34 @@ only used when no argument is passed.) A Visual Studio project
     matching what the local 3D preview already shows for that same
     selection.
 
+    **One AutoCAD block per mesh, not loose polylines (2026-09-07)** - per
+    explicit follow-up request ("make every MassElement into a block in
+    order to select individually"): `sendMeshToHost` was rewritten again to
+    publish ONE message per mesh, not one `{"points":[...]}` publish per
+    face - `{"block":[[[x,y,z],...],[[x,y,z],...],...]}`, every face
+    together. `HsbChatPanelPoc`'s receiving side (same `"acad_geometry"`
+    connection, no new topic) now checks for this shape first
+    (`extractBlockLines`, in that project's `HubProtocol.h/.cpp`) before
+    falling back to the existing single-curve `"points"` shape - the two
+    are unambiguous (different JSON keys) so there's no risk of
+    misdetecting a plain curve publish. `DrawWorldBlock`
+    (`HsbChatPanelPoc\GeometryDraw.h/.cpp`) draws each face's
+    `AcDb3dPolyline` into a **new, uniquely-named `AcDbBlockTableRecord`**
+    (`HsbMesh_1`, `HsbMesh_2`, ... - a process-lifetime counter) instead of
+    model space directly, then inserts ONE `AcDbBlockReference` for it (at
+    the origin, no transform - every polyline's own vertices are already
+    absolute world coordinates) - so a pick anywhere on the mesh selects
+    the *whole* block reference as one entity, not one polyline/face at a
+    time. Verified these ObjectARX APIs are actually exported this time
+    (after the `AcDbSubDMesh` lesson) via `dumpbin /linkermember:1` (not
+    plain `/symbols`, which - also a lesson learned - doesn't enumerate an
+    import lib's archive members by default and had made the earlier
+    `AcDbSubDMesh` search look emptier than it needed to, though that
+    particular conclusion held up under the corrected method too):
+    `AcDbBlockReference`'s point+id constructor, `AcDbBlockTableRecord`'s
+    public no-arg constructor, and `AcDbSymbolTable::add` (inherited by
+    `AcDbBlockTable`) are all genuinely exported by `acdb25.lib`.
+
     **Verified working end-to-end against real production data** (not a
     synthetic test payload): a real hsbcad export,
     `GTT-BHOMES_WIP_TM_detached\...\R25_V29-Akron - Mechanical_detached.dxx`
@@ -223,12 +247,23 @@ only used when no argument is passed.) A Visual Studio project
     row), so verified instead with a throwaway headless test program
     (compiled directly against this project's own `dxx_parser.cpp`, no
     FLTK) that parsed the real file, ran `extractMeshBody` on the first
-    real `MassElement`, and replicated `sendMeshToHost`'s exact publish
-    logic - `wsget` (subscribed to `acad_geometry`) confirmed all 3 test
-    faces arrived correctly stripped/formatted, e.g. the self-touching face
-    arriving as 10 points (11 minus the trailing duplicate), with real,
-    sane coordinates (register/duct-scale, consistent ~6.35mm Z-offset
-    matching that element's own `"12x6 FD"` register data).
+    real `MassElement`, and replicated `sendMeshToHost`'s exact
+    JSON-building logic - `wsget` (subscribed to `acad_geometry`) confirmed
+    the single combined `"block"` message arrived with all 11 faces
+    correctly stripped/formatted (e.g. the self-touching face arriving as
+    10 points, 11 minus the trailing duplicate), with real, sane
+    coordinates (register/duct-scale, consistent ~6.35mm Z-offset matching
+    that element's own `"12x6 FD"` register data). `HubProtocol.cpp`'s
+    `extractBlockLines` was verified by careful manual trace against this
+    exact captured payload (bracket-depth tracking through multiple
+    same-message curves, confirming a short/degenerate curve is correctly
+    filtered). **Confirmed working inside a real AutoCAD session** too
+    (user-tested, 2026-09-07): picking anywhere on the drawn mesh selects
+    the whole `HsbMesh_N` block as one entity, as intended - including
+    after `HsbChatPanelPoc`'s follow-up switch to fan-triangulated
+    `AcDbFace` triangles instead of `AcDb3dPolyline` outlines (see that
+    project's own `README.md`), which only changed how the receiving side
+    draws this same wire format, not this project's own publishing code.
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
   - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with

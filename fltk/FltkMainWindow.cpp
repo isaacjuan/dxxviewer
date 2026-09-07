@@ -157,24 +157,28 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
     }
 }
 
-// Publishes `mesh`'s faces to the SAME "acad_geometry" topic/wire format
-// sendGeometryToHost's curves already use ({"points":[[x,y,z],...]}, one
-// publish per face) - a wireframe-per-face representation via the
-// already-working AcDb3dPolyline/DrawWorldPolylines pipeline, not a real
-// solid/mesh AutoCAD entity: AutoCAD's own mesh entity classes turned out
-// not to be usable here - AcDbPolyFaceMesh has no header at all in the
-// installed ObjectARX 2026 SDK, and AcDbSubDMesh has a header
-// (dbSubD.h) but its constructor/setSubDMesh aren't exported by any DLL in
-// the installed AutoCAD 2026 (confirmed via `dumpbin /exports` across the
-// whole install tree - accdb25.dll/accore.dll neither one has it, despite
-// the header existing). A wireframe-per-face polyline set is what's
-// actually achievable without a new AutoCAD-side entity type, and reuses
-// 100% already-verified infrastructure (no HsbChatPanelPoc changes needed).
+// Publishes `mesh`'s faces to the SAME "acad_geometry" topic
+// sendGeometryToHost's curves already use, but as ONE message -
+// {"block":[[[x,y,z],...],[[x,y,z],...],...]}, all faces together - not one
+// {"points":[...]} publish per face. This is what makes the receiving side
+// (HsbChatPanelPoc's DrawWorldBlock, see that project's own
+// HubProtocol.h/extractBlockLines) draw the whole mesh as a single new
+// AutoCAD block: one pick selects the entire MassElement, not one polyline
+// at a time - the whole reason for this shape (2026-09-07, per explicit
+// request: "make every MassElement into a block in order to select
+// individually"). Still a wireframe-per-face representation via the
+// already-working AcDb3dPolyline pipeline, not a real solid/mesh AutoCAD
+// entity: AutoCAD's own mesh entity classes turned out not to be usable
+// here - AcDbPolyFaceMesh has no header at all in the installed ObjectARX
+// 2026 SDK, and AcDbSubDMesh has a header (dbSubD.h) but its constructor/
+// setSubDMesh aren't exported by any DLL in the installed AutoCAD 2026
+// (confirmed via `dumpbin /exports` across the whole install tree -
+// acdb25.dll/accore.dll neither one has it, despite the header existing).
 //
 // A face's own index list (dxx::MeshBody::faces, 0-based into
 // mesh.vertices) sometimes repeats its first index at the end (explicitly
 // closing the loop, e.g. "0,1,2,3,0") - stripped here since
-// DrawWorldPolylines' AcDb3dPolyline already closes the loop itself
+// DrawWorldBlock's own AcDb3dPolyline already closes the loop itself
 // (connecting the last point back to the first, same as every curve
 // already published this way); an internal repeated index (a
 // self-touching/bridged boundary - e.g. an L-shaped or multiply-connected
@@ -190,8 +194,8 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
         return;
     }
 
-    bool anySent = false;
-    bool anyPublishFailed = false;
+    std::string data = "{\"block\":[";
+    bool anyFace = false;
     for (const std::vector<int>& face : mesh.faces) {
         std::vector<int> loop = face;
         if (loop.size() >= 2 && loop.front() == loop.back())
@@ -199,7 +203,7 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
         if (loop.size() < 2)
             continue;
 
-        std::string data = "{\"points\":[";
+        std::string curve = "[";
         bool validIndices = true;
         for (size_t i = 0; i < loop.size() && validIndices; ++i) {
             int idx = loop[i];
@@ -209,26 +213,33 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
             }
             const dxx::Point3D& pt = mesh.vertices[static_cast<size_t>(idx)];
             if (i > 0)
-                data += ",";
+                curve += ",";
             char buf[96];
             snprintf(buf, sizeof(buf), "[%g,%g,%g]", pt.x, pt.y, pt.z);
-            data += buf;
+            curve += buf;
         }
-        data += "]}";
+        curve += "]";
         if (!validIndices)
             continue;
 
-        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
-            anySent = true;
-        else
-            anyPublishFailed = true;
+        if (anyFace)
+            data += ",";
+        data += curve;
+        anyFace = true;
+    }
+    data += "]}";
+
+    if (!anyFace) {
+        if (!silentOnFailure) {
+            fl_message_title("Draw in AutoCAD");
+            fl_message("No usable face data in the current selection.");
+        }
+        return;
     }
 
-    if (!anySent && !silentOnFailure) {
+    if (!PublishToHub(kHubHost, kHubPort, kGeometryTopic, data) && !silentOnFailure) {
         fl_message_title("Draw in AutoCAD");
-        fl_message(anyPublishFailed
-            ? "Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?)."
-            : "No usable face data in the current selection.");
+        fl_message("Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?).");
     }
 }
 
