@@ -157,6 +157,102 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
     }
 }
 
+// Publishes `mesh`'s faces to the SAME "acad_geometry" topic/wire format
+// sendGeometryToHost's curves already use ({"points":[[x,y,z],...]}, one
+// publish per face) - a wireframe-per-face representation via the
+// already-working AcDb3dPolyline/DrawWorldPolylines pipeline, not a real
+// solid/mesh AutoCAD entity: AutoCAD's own mesh entity classes turned out
+// not to be usable here - AcDbPolyFaceMesh has no header at all in the
+// installed ObjectARX 2026 SDK, and AcDbSubDMesh has a header
+// (dbSubD.h) but its constructor/setSubDMesh aren't exported by any DLL in
+// the installed AutoCAD 2026 (confirmed via `dumpbin /exports` across the
+// whole install tree - accdb25.dll/accore.dll neither one has it, despite
+// the header existing). A wireframe-per-face polyline set is what's
+// actually achievable without a new AutoCAD-side entity type, and reuses
+// 100% already-verified infrastructure (no HsbChatPanelPoc changes needed).
+//
+// A face's own index list (dxx::MeshBody::faces, 0-based into
+// mesh.vertices) sometimes repeats its first index at the end (explicitly
+// closing the loop, e.g. "0,1,2,3,0") - stripped here since
+// DrawWorldPolylines' AcDb3dPolyline already closes the loop itself
+// (connecting the last point back to the first, same as every curve
+// already published this way); an internal repeated index (a
+// self-touching/bridged boundary - e.g. an L-shaped or multiply-connected
+// face) is passed through as-is, same vertex walk FltkMeshWidget's own
+// GL_POLYGON already renders for that face.
+void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
+{
+    if (mesh.vertices.empty() || mesh.faces.empty()) {
+        if (!silentOnFailure) {
+            fl_message_title("Draw in AutoCAD");
+            fl_message("No mesh geometry in the current selection.");
+        }
+        return;
+    }
+
+    bool anySent = false;
+    bool anyPublishFailed = false;
+    for (const std::vector<int>& face : mesh.faces) {
+        std::vector<int> loop = face;
+        if (loop.size() >= 2 && loop.front() == loop.back())
+            loop.pop_back();
+        if (loop.size() < 2)
+            continue;
+
+        std::string data = "{\"points\":[";
+        bool validIndices = true;
+        for (size_t i = 0; i < loop.size() && validIndices; ++i) {
+            int idx = loop[i];
+            if (idx < 0 || static_cast<size_t>(idx) >= mesh.vertices.size()) {
+                validIndices = false;
+                break;
+            }
+            const dxx::Point3D& pt = mesh.vertices[static_cast<size_t>(idx)];
+            if (i > 0)
+                data += ",";
+            char buf[96];
+            snprintf(buf, sizeof(buf), "[%g,%g,%g]", pt.x, pt.y, pt.z);
+            data += buf;
+        }
+        data += "]}";
+        if (!validIndices)
+            continue;
+
+        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
+            anySent = true;
+        else
+            anyPublishFailed = true;
+    }
+
+    if (!anySent && !silentOnFailure) {
+        fl_message_title("Draw in AutoCAD");
+        fl_message(anyPublishFailed
+            ? "Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?)."
+            : "No usable face data in the current selection.");
+    }
+}
+
+// Draws whatever's currently selected/previewed to the host: curve geometry
+// if any (extractCurves3D, checked first) via sendGeometryToHost, else the
+// mesh already resolved for the local preview pane (`meshCache` - the exact
+// FltkMainWindow::m_meshCache onNodeSelected computed, not recomputed here)
+// via sendMeshToHost, else a "nothing to draw" dialog (unless silent).
+void drawSelectionToHost(const dxx::DxxNode* node, const dxx::MeshBody* meshCache, bool silentOnFailure = false)
+{
+    if (node && !dxx::extractCurves3D(*node).empty()) {
+        sendGeometryToHost(node, silentOnFailure);
+        return;
+    }
+    if (meshCache) {
+        sendMeshToHost(*meshCache, silentOnFailure);
+        return;
+    }
+    if (!silentOnFailure) {
+        fl_message_title("Draw in AutoCAD");
+        fl_message(node ? "No curve or mesh geometry in the current selection." : "Nothing selected.");
+    }
+}
+
 const char* kHubTopic = "map";
 const char* kElementCommandsTopic = "element_commands";
 const char* kAppVersion = "1.0.0";
@@ -322,7 +418,7 @@ void FltkMainWindow::buildLayout()
 
     btnDraw->callback([](Fl_Widget*, void* data) {
         auto* self = static_cast<FltkMainWindow*>(data);
-        sendGeometryToHost(self->m_selectedNode);
+        drawSelectionToHost(self->m_selectedNode, self->m_meshCache.get());
     }, this);
 }
 
@@ -458,8 +554,18 @@ void FltkMainWindow::onNodeSelected(const dxx::DxxNode* node)
     // hub running (a legitimate standalone-dev scenario now that this no
     // longer needs HsbChatPanelPoc's embedding) shouldn't pop a dialog on
     // every single CURVE click either.
+    //
+    // Same idea, added for mesh selections (e.g. a MassElement/SimpleBody):
+    // reuses m_meshCache - the exact "does this selection resolve to a mesh"
+    // check the preview pane just above already made - rather than a second
+    // extractMeshBody() search, and deliberately does NOT broaden the CURVE
+    // branch's own literal-name gate to match (kept exactly as before, not
+    // "any ancestor with a nested curve", to avoid changing existing
+    // curve-auto-draw behavior at all).
     if (node && node->name == "CURVE" && !dxx::extractCurves3D(*node).empty())
         sendGeometryToHost(node, /*silentOnFailure=*/true);
+    else if (m_meshCache)
+        sendMeshToHost(*m_meshCache, /*silentOnFailure=*/true);
 }
 
 void FltkMainWindow::doSearch()

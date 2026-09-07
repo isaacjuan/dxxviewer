@@ -164,6 +164,71 @@ only used when no argument is passed.) A Visual Studio project
     point back to the origin comes from `tessellateCurveWorld` itself,
     unchanged - not something this change affects) - process stayed alive
     throughout, running fully standalone (no `HsbChatPanelPoc` host).
+
+    **Mesh selections (e.g. a `MassElement`/`SimpleBody`) draw too
+    (2026-09-07)** - `sendMeshToHost` publishes a mesh's faces to the SAME
+    `"acad_geometry"` topic/wire shape curves already use
+    (`{"points":[[x,y,z],...]}`), one publish per face - a
+    wireframe-per-face representation via the already-working
+    `AcDb3dPolyline`/`DrawWorldPolylines` pipeline, **not** a real
+    solid/mesh AutoCAD entity. That was the first attempt (an
+    `AcDbSubDMesh`, ObjectARX's modern mesh entity), abandoned after a real
+    SDK/linkage dead end: `AcDbPolyFaceMesh` has no header at all in the
+    installed ObjectARX 2026 SDK, and `AcDbSubDMesh` (`dbSubD.h`) has a
+    header but its constructor/`setSubDMesh` aren't exported by *any* DLL
+    in the installed AutoCAD 2026 - confirmed via `dumpbin /exports`
+    recursively across the entire install tree, not just `acdb25.dll`/
+    `accore.dll` (`HsbChatPanelPoc`'s own attempt at wiring this up hit a
+    `LNK2019` on exactly these symbols; reverted rather than left half-
+    working). A wireframe-per-face polyline set needs zero new
+    `HsbChatPanelPoc`-side code at all - the existing "acad_geometry"
+    channel already draws it.
+
+    `dxx::MeshBody::faces` (0-based indices into `mesh.vertices`) sometimes
+    repeats its first index at the end, explicitly closing the loop (e.g.
+    `0,1,2,3,0`) - stripped before publishing, since `DrawWorldPolylines`'s
+    `AcDb3dPolyline` already closes the loop itself (same convention every
+    curve published this way already uses). An *internal* repeated index (a
+    self-touching/bridged boundary - e.g. an L-shaped or multiply-connected
+    face, seen in real data - see below) is passed through as-is, same
+    vertex walk `FltkMeshWidget`'s own `GL_POLYGON` already renders for that
+    face.
+
+    Wired into both the `"Draw"` button and auto-draw-on-selection via a
+    small dispatcher, `drawSelectionToHost(node, meshCache,
+    silentOnFailure)`: tries `extractCurves3D` first (unchanged), else
+    falls back to `meshCache` (the exact `FltkMainWindow::m_meshCache` the
+    preview pane itself just resolved via `extractMeshBody` - not a second
+    recursive search), else a "nothing to draw" dialog. Auto-draw's own
+    curve branch keeps its exact original `node->name == "CURVE"` gate
+    unchanged (deliberately NOT broadened to "any ancestor with a nested
+    curve", to avoid changing existing curve-auto-draw behavior); the mesh
+    branch (`else if (m_meshCache) sendMeshToHost(...)`) reuses that same
+    "did the preview pane find a mesh" check, so selecting an ancestor like
+    `MassElement` (not just the literal `SimpleBody` container) auto-draws,
+    matching what the local 3D preview already shows for that same
+    selection.
+
+    **Verified working end-to-end against real production data** (not a
+    synthetic test payload): a real hsbcad export,
+    `GTT-BHOMES_WIP_TM_detached\...\R25_V29-Akron - Mechanical_detached.dxx`
+    (~9.8MB, 1M+ lines, 659 `MassElement` nodes) - confirmed the file
+    contains genuine `SimpleBody`/`vertexList`/`faceList` blocks directly
+    under `MassElement` (one instance: 16 vertices, 11 faces, including a
+    real self-touching face - `4,5,6,7,8,9,10,11,8,7,4` - and a real
+    trailing-closing-duplicate face - `0,1,2,3,0`). GUI automation via
+    simulated clicks proved unreliable here (a DPI-scaling mismatch between
+    `GetWindowRect`'s reported coordinates and where a click actually
+    landed - confirmed by a click consistently selecting the wrong tree
+    row), so verified instead with a throwaway headless test program
+    (compiled directly against this project's own `dxx_parser.cpp`, no
+    FLTK) that parsed the real file, ran `extractMeshBody` on the first
+    real `MassElement`, and replicated `sendMeshToHost`'s exact publish
+    logic - `wsget` (subscribed to `acad_geometry`) confirmed all 3 test
+    faces arrived correctly stripped/formatted, e.g. the self-touching face
+    arriving as 10 points (11 minus the trailing duplicate), with real,
+    sane coordinates (register/duct-scale, consistent ~6.35mm Z-offset
+    matching that element's own `"12x6 FD"` register data).
   - `FltkTreePanel` (`Fl_Tree`) — tree population + search + selection.
   - `FltkPropertiesPanel` (`Fl_Table_Row`) — property/value inspector.
   - `FltkGeometryWidget` (`Fl_Widget`) — 2D profile preview rendered with
