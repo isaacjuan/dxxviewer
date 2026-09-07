@@ -27,6 +27,7 @@ SOURCES += \
     FltkGeometryWidget.cpp \
     FltkMeshWidget.cpp \
     HubClient.cpp \
+    ElementCommandsBridge.cpp \
     ../dxx_parser.cpp \
     ../gzip_decompress.cpp
 
@@ -37,8 +38,10 @@ HEADERS += \
     FltkGeometryWidget.h \
     FltkMeshWidget.h \
     HubClient.h \
+    ElementCommandsBridge.h \
     ../dxx_parser.h \
-    ../colors.h
+    ../colors.h \
+    ../third_party/json.hpp
 
 LIBS += -L$$FLTK_ROOT/lib -L$$CAIRO_ROOT/lib
 LIBS += -lfltk_gl -lfltk -lfltk_images -lfltk_png -lfltk_z

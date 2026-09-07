@@ -29,6 +29,7 @@ if not exist build mkdir build
     FltkGeometryWidget.cpp ^
     FltkMeshWidget.cpp ^
     HubClient.cpp ^
+    ElementCommandsBridge.cpp ^
     ..\dxx_parser.cpp ^
     ..\gzip_decompress.cpp ^
     -I. ^

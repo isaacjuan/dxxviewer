@@ -92,6 +92,7 @@
     <ClCompile Include="FltkGeometryWidget.cpp" />
     <ClCompile Include="FltkMeshWidget.cpp" />
     <ClCompile Include="HubClient.cpp" />
+    <ClCompile Include="ElementCommandsBridge.cpp" />
     <ClCompile Include="..\dxx_parser.cpp" />
     <ClCompile Include="..\gzip_decompress.cpp" />
   </ItemGroup>
@@ -102,8 +103,10 @@
     <ClInclude Include="FltkGeometryWidget.h" />
     <ClInclude Include="FltkMeshWidget.h" />
     <ClInclude Include="HubClient.h" />
+    <ClInclude Include="ElementCommandsBridge.h" />
     <ClInclude Include="..\dxx_parser.h" />
     <ClInclude Include="..\colors.h" />
+    <ClInclude Include="..\third_party\json.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

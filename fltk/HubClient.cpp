@@ -282,7 +282,18 @@ HubClient::HubClient(std::string host, unsigned short port, std::string topic,
                        std::function<void(std::string, std::string)> onMapText,
                        std::function<void(bool)> onConnectionChanged)
     : m_host(std::move(host)), m_port(port), m_topic(std::move(topic)),
+      m_rawMode(false),
       m_onMapText(std::move(onMapText)),
+      m_onConnectionChanged(std::move(onConnectionChanged)) {
+    m_thread = std::thread([this] { run(); });
+}
+
+HubClient::HubClient(std::string host, unsigned short port, std::string topic,
+                       std::function<void(std::string)> onRawMessage,
+                       std::function<void(bool)> onConnectionChanged)
+    : m_host(std::move(host)), m_port(port), m_topic(std::move(topic)),
+      m_rawMode(true),
+      m_onRawMessage(std::move(onRawMessage)),
       m_onConnectionChanged(std::move(onConnectionChanged)) {
     m_thread = std::thread([this] { run(); });
 }
@@ -350,34 +361,41 @@ void HubClient::run() {
 
             std::string message;
             while (!m_stop.load() && readMessage(sock, m_stop, message)) {
-                if (!isControlReply(message)) {
-                    size_t firstCh = message.find_first_not_of(" \t\r\n");
-                    std::string text, filename;
-                    bool decoded = false;
+                if (isControlReply(message)) continue;
 
-                    if (firstCh != std::string::npos && message[firstCh] == '{') {
-                        // The toolkit's `cb64 | sendws` shape: a JSON object
-                        // {filename, size, content_base64} - see dotnet/TOOLKIT.md.
-                        std::string b64;
-                        if (extractJsonObjectStringField(message, "content_base64", b64)) {
-                            text = base64Decode(b64);
-                            extractJsonObjectStringField(message, "filename", filename);
-                            decoded = true;
-                        }
-                    } else if (firstCh != std::string::npos && message[firstCh] == '"') {
-                        // A producer publishing the raw DXX text directly as a
-                        // JSON string (e.g. a plain `sendws --topic map` line).
-                        decoded = decodeJsonStringLiteral(message, text);
-                    }
+                if (m_rawMode) {
+                    // No DXX-shape detection at all - deliver verbatim (e.g.
+                    // for a JSON topic like "element_commands").
+                    postToMain([this, msg = message]() mutable { m_onRawMessage(std::move(msg)); });
+                    continue;
+                }
 
-                    if (decoded) {
-                        postToMain([this, text = std::move(text), filename = std::move(filename)]() mutable {
-                            m_onMapText(std::move(text), std::move(filename));
-                        });
-                    } else {
-                        std::fprintf(stderr, "dxxviewer: ignoring unrecognized map payload shape on topic '%s'\n",
-                                     m_topic.c_str());
+                size_t firstCh = message.find_first_not_of(" \t\r\n");
+                std::string text, filename;
+                bool decoded = false;
+
+                if (firstCh != std::string::npos && message[firstCh] == '{') {
+                    // The toolkit's `cb64 | sendws` shape: a JSON object
+                    // {filename, size, content_base64} - see dotnet/TOOLKIT.md.
+                    std::string b64;
+                    if (extractJsonObjectStringField(message, "content_base64", b64)) {
+                        text = base64Decode(b64);
+                        extractJsonObjectStringField(message, "filename", filename);
+                        decoded = true;
                     }
+                } else if (firstCh != std::string::npos && message[firstCh] == '"') {
+                    // A producer publishing the raw DXX text directly as a
+                    // JSON string (e.g. a plain `sendws --topic map` line).
+                    decoded = decodeJsonStringLiteral(message, text);
+                }
+
+                if (decoded) {
+                    postToMain([this, text = std::move(text), filename = std::move(filename)]() mutable {
+                        m_onMapText(std::move(text), std::move(filename));
+                    });
+                } else {
+                    std::fprintf(stderr, "dxxviewer: ignoring unrecognized map payload shape on topic '%s'\n",
+                                 m_topic.c_str());
                 }
             }
 

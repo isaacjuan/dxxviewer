@@ -31,6 +31,15 @@ public:
     HubClient(std::string host, unsigned short port, std::string topic,
                std::function<void(std::string dxxText, std::string filename)> onMapText,
                std::function<void(bool)> onConnectionChanged);
+
+    // Raw mode: delivers every non-control-reply broadcast on `topic`
+    // verbatim, with none of the DXX {filename,content_base64}/bare-string
+    // shape detection the constructor above does - for JSON topics like
+    // "element_commands" that aren't DXX text at all. onConnectionChanged
+    // behaves exactly as above.
+    HubClient(std::string host, unsigned short port, std::string topic,
+               std::function<void(std::string rawMessage)> onRawMessage,
+               std::function<void(bool)> onConnectionChanged);
     ~HubClient();
 
     HubClient(const HubClient&) = delete;
@@ -42,7 +51,9 @@ private:
     std::string m_host;
     unsigned short m_port;
     std::string m_topic;
+    bool m_rawMode = false;
     std::function<void(std::string, std::string)> m_onMapText;
+    std::function<void(std::string)> m_onRawMessage;
     std::function<void(bool)> m_onConnectionChanged;
     std::atomic<bool> m_stop{false};
     std::thread m_thread;
