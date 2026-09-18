@@ -279,11 +279,11 @@ void postToMain(std::function<void()> fn) {
 } // anonymous namespace
 
 HubClient::HubClient(std::string host, unsigned short port, std::string topic,
-                       std::function<void(std::string, std::string)> onMapText,
+                       std::function<void(std::optional<dxx::DxxDocument>, std::string)> onMapDocument,
                        std::function<void(bool)> onConnectionChanged)
     : m_host(std::move(host)), m_port(port), m_topic(std::move(topic)),
       m_rawMode(false),
-      m_onMapText(std::move(onMapText)),
+      m_onMapDocument(std::move(onMapDocument)),
       m_onConnectionChanged(std::move(onConnectionChanged)) {
     m_thread = std::thread([this] { run(); });
 }
@@ -390,8 +390,14 @@ void HubClient::run() {
                 }
 
                 if (decoded) {
-                    postToMain([this, text = std::move(text), filename = std::move(filename)]() mutable {
-                        m_onMapText(std::move(text), std::move(filename));
+                    // Parsed HERE, on this background thread, not after the hop to the main
+                    // thread - dxx::parseString touches no FLTK/global state (see dxx_parser.cpp),
+                    // so it's safe to run off-thread, and doing so is the whole point: a large
+                    // model's parse cost is paid here instead of freezing the UI. Only the already-
+                    // built DxxDocument crosses over via Fl::awake.
+                    auto doc = dxx::parseString(text);
+                    postToMain([this, doc = std::move(doc), filename = std::move(filename)]() mutable {
+                        m_onMapDocument(std::move(doc), std::move(filename));
                     });
                 } else {
                     std::fprintf(stderr, "dxxviewer: ignoring unrecognized map payload shape on topic '%s'\n",

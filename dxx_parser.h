@@ -164,6 +164,38 @@ struct MeshBody {
 // vertices/faces.
 [[nodiscard]] std::optional<MeshBody> extractMeshBody(const DxxNode& node);
 
+// Like extractMeshBody, but collects every distinct mesh container found
+// anywhere under `node` (not just the nearest one) - one MeshBody per
+// container. Lets a container node (e.g. the document root, or any node with
+// several MassElement/SimpleBody descendants) draw every mesh underneath it
+// in one go, since real DXX coordinates are absolute (no per-node
+// re-origining needed to combine them).
+[[nodiscard]] std::vector<MeshBody> extractAllMeshBodies(const DxxNode& node);
+
+// Finds the nearest descendant of `node` (or `node` itself) named "GenBeam" -
+// a parametric oriented box (a stick-frame beam/stud), unlike extractMeshBody's
+// baked vertexList/faceList SimpleBody data: a center point (11ptCenX/Y/Z), a
+// 3x3 orientation basis (13vecX*/13vecY*/13vecZ*) and length/width/height
+// (40dL/40dW/40dH). Synthesizes the same 8-vertex/6-face box shape
+// extractMeshBody would for a real mesh, so it flows through the identical
+// downstream pipeline (3D preview, AutoCAD hub publish) unchanged. Returns
+// nullopt if no GenBeam node exists under `node`, or its dimensions are
+// degenerate (<=0).
+[[nodiscard]] std::optional<MeshBody> extractGenBeamBox(const DxxNode& node);
+
+// Like extractGenBeamBox, but collects every GenBeam box found anywhere
+// under `node`, not just the nearest one - see extractAllMeshBodies.
+[[nodiscard]] std::vector<MeshBody> extractAllGenBeamBoxes(const DxxNode& node);
+
+// Combines several independent MeshBody objects (e.g. extractAllMeshBodies +
+// extractAllGenBeamBoxes results) into one, offsetting each source's face
+// indices by its running vertex count so the merged faces still index
+// correctly into the merged vertex list. For a renderer (FltkMeshWidget) that
+// only knows how to show a single MeshBody - safe because real DXX
+// coordinates are already absolute/world-space, so no re-origining is needed
+// to combine them.
+[[nodiscard]] MeshBody mergeMeshBodies(const std::vector<MeshBody>& meshes);
+
 // Tessellates a curve's bulge arcs into straight segments and places each
 // point in world space via origin + x*vecX + y*vecY + z*normal, returning a
 // single closed polyline. For renderers (the 3D view) that need flat 3D

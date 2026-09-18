@@ -23,11 +23,27 @@
 
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <string>
+#include <thread>
 
 namespace dxxviewer {
 
 namespace {
+
+// Runs `fn` on the FLTK main thread via Fl::awake, from any thread - same
+// mechanism HubClient.cpp's own postToMain uses for the equivalent hub-
+// receive handoff, duplicated here (not shared) since it's a tiny, generic
+// trampoline, not worth wiring a new shared header for.
+void postToMain(std::function<void()> fn)
+{
+    auto* payload = new std::function<void()>(std::move(fn));
+    Fl::awake([](void* v) {
+        auto* p = static_cast<std::function<void()>*>(v);
+        (*p)();
+        delete p;
+    }, payload);
+}
 const char* kOpenLabel = "Open";
 const char* kReloadLabel = "Reload";
 const char* kExpandLabel = "+ Expand";
@@ -106,6 +122,21 @@ const unsigned short kHubPort = 8181;
 // {"points":[[x,y,z],...]} shape built below).
 const char* kGeometryTopic = "acad_geometry";
 
+// Shows a "Draw in AutoCAD" status dialog with `message`, unless
+// silentOnFailure - the title is always the same, only the body differs per
+// caller/failure reason. Shared by sendGeometryToHost/sendMeshToHost/
+// drawSelectionToHost, which between them have several such dialogs (button
+// click gets one, auto-draw-on-selection passes silentOnFailure=true so
+// browsing the tree - or running with no hub up - doesn't pop one on every
+// single click).
+void showDrawMessage(bool silentOnFailure, const char* message)
+{
+    if (silentOnFailure)
+        return;
+    fl_message_title("Draw in AutoCAD");
+    fl_message("%s", message);
+}
+
 // Builds "[x,y,z],[x,y,z],..." (no enclosing brackets) from `points` - the
 // inner-tuple-list fragment shared by sendGeometryToHost's own "points"
 // array and sendMeshToHost's own per-face "curve" arrays.
@@ -136,18 +167,12 @@ std::string joinPointsAsJsonTuples(const std::vector<dxx::Point3D>& points)
 void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
 {
     if (!node) {
-        if (!silentOnFailure) {
-            fl_message_title("Draw in AutoCAD");
-            fl_message("Nothing selected.");
-        }
+        showDrawMessage(silentOnFailure, "Nothing selected.");
         return;
     }
     std::vector<dxx::Curve> curves = dxx::extractCurves3D(*node);
     if (curves.empty()) {
-        if (!silentOnFailure) {
-            fl_message_title("Draw in AutoCAD");
-            fl_message("No curve geometry in the current selection.");
-        }
+        showDrawMessage(silentOnFailure, "No curve geometry in the current selection.");
         return;
     }
 
@@ -166,31 +191,29 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
             anyPublishFailed = true;
     }
 
-    if (!anySent && !silentOnFailure) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message(anyPublishFailed
+    if (!anySent) {
+        showDrawMessage(silentOnFailure, anyPublishFailed
             ? "Failed to publish curve to the AutoCAD hub (is hsbWebSocketHub running?)."
             : "No curve geometry in the current selection.");
     }
 }
 
-// Publishes `mesh`'s faces to the SAME "acad_geometry" topic
-// sendGeometryToHost's curves already use, but as ONE message -
-// {"block":[[[x,y,z],...],[[x,y,z],...],...]}, all faces together - not one
-// {"points":[...]} publish per face. This is what makes the receiving side
-// (HsbChatPanelPoc's DrawWorldBlock, see that project's own
-// HubProtocol.h/extractBlockLines) draw the whole mesh as a single new
-// AutoCAD block: one pick selects the entire MassElement, not one polyline
-// at a time - the whole reason for this shape (2026-09-07, per explicit
-// request: "make every MassElement into a block in order to select
-// individually"). Still a wireframe-per-face representation via the
-// already-working AcDb3dPolyline pipeline, not a real solid/mesh AutoCAD
-// entity: AutoCAD's own mesh entity classes turned out not to be usable
-// here - AcDbPolyFaceMesh has no header at all in the installed ObjectARX
-// 2026 SDK, and AcDbSubDMesh has a header (dbSubD.h) but its constructor/
-// setSubDMesh aren't exported by any DLL in the installed AutoCAD 2026
-// (confirmed via `dumpbin /exports` across the whole install tree -
-// acdb25.dll/accore.dll neither one has it, despite the header existing).
+// Builds the {"block":[[[x,y,z],...],[[x,y,z],...],...]} JSON for `mesh` -
+// all faces together in ONE message, not one {"points":[...]} publish per
+// face. This is what makes the receiving side (HsbChatPanelPoc's
+// DrawWorldBlock, see that project's own HubProtocol.h/extractBlockLines)
+// draw the whole mesh as a single new AutoCAD block: one pick selects the
+// entire MassElement, not one polyline at a time - the whole reason for this
+// shape (2026-09-07, per explicit request: "make every MassElement into a
+// block in order to select individually"). Still a wireframe-per-face
+// representation via the already-working AcDb3dPolyline pipeline, not a real
+// solid/mesh AutoCAD entity: AutoCAD's own mesh entity classes turned out not
+// to be usable here - AcDbPolyFaceMesh has no header at all in the installed
+// ObjectARX 2026 SDK, and AcDbSubDMesh has a header (dbSubD.h) but its
+// constructor/setSubDMesh aren't exported by any DLL in the installed
+// AutoCAD 2026 (confirmed via `dumpbin /exports` across the whole install
+// tree - acdb25.dll/accore.dll neither one has it, despite the header
+// existing).
 //
 // A face's own index list (dxx::MeshBody::faces, 0-based into
 // mesh.vertices) sometimes repeats its first index at the end (explicitly
@@ -201,16 +224,13 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
 // self-touching/bridged boundary - e.g. an L-shaped or multiply-connected
 // face) is passed through as-is, same vertex walk FltkMeshWidget's own
 // GL_POLYGON already renders for that face.
-void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
+//
+// Returns nullopt if `mesh` has no usable face data (nothing to publish) -
+// shared by sendMeshToHost (single mesh) and drawSelectionToHost (every mesh/
+// beam under a selection) so both use the exact same stripping/validity
+// logic instead of drifting apart.
+std::optional<std::string> buildMeshBlockJson(const dxx::MeshBody& mesh)
 {
-    if (mesh.vertices.empty() || mesh.faces.empty()) {
-        if (!silentOnFailure) {
-            fl_message_title("Draw in AutoCAD");
-            fl_message("No mesh geometry in the current selection.");
-        }
-        return;
-    }
-
     std::string data = "{\"block\":[";
     bool anyFace = false;
     for (const std::vector<int>& face : mesh.faces) {
@@ -240,45 +260,85 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
         anyFace = true;
     }
     data += "]}";
+    return anyFace ? std::make_optional(std::move(data)) : std::nullopt;
+}
 
-    if (!anyFace) {
-        if (!silentOnFailure) {
-            fl_message_title("Draw in AutoCAD");
-            fl_message("No usable face data in the current selection.");
-        }
+void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
+{
+    if (mesh.vertices.empty() || mesh.faces.empty()) {
+        showDrawMessage(silentOnFailure, "No mesh geometry in the current selection.");
         return;
     }
 
-    if (!PublishToHub(kHubHost, kHubPort, kGeometryTopic, data) && !silentOnFailure) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message("Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?).");
+    std::optional<std::string> data = buildMeshBlockJson(mesh);
+    if (!data) {
+        showDrawMessage(silentOnFailure, "No usable face data in the current selection.");
+        return;
+    }
+
+    if (!PublishToHub(kHubHost, kHubPort, kGeometryTopic, *data)) {
+        showDrawMessage(silentOnFailure, "Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?).");
     }
 }
 
-// Draws whatever's currently selected/previewed to the host: curve geometry
-// if any (extractCurves3D, checked first) via sendGeometryToHost, else the
-// mesh already resolved for the local preview pane (`meshCache` - the exact
-// FltkMainWindow::m_meshCache onNodeSelected computed, not recomputed here)
-// via sendMeshToHost, else a "nothing to draw" dialog (unless silent).
-void drawSelectionToHost(const dxx::DxxNode* node, const dxx::MeshBody* meshCache, bool silentOnFailure = false)
+// Draws EVERYTHING found anywhere under `node`, not just one nearest/cached
+// match: every curve (extractCurves3D already walks the whole subtree), plus
+// every real mesh (extractAllMeshBodies) and every GenBeam box
+// (extractAllGenBeamBoxes) - each published as its own hub message/AutoCAD
+// block. This is what lets the "Draw" button draw a whole container (e.g.
+// the document root, or any node with several MassElement/GenBeam
+// descendants) in one click, not just a single selected leaf - real DXX
+// coordinates are absolute, so nothing needs re-projecting to combine them.
+// Deliberately only wired to the explicit "Draw" button, not to
+// onNodeSelected's auto-draw-on-selection: that path intentionally keeps its
+// own narrower single-element behavior (see onNodeSelected), so just
+// browsing the tree can't accidentally fire dozens of hub publishes from one
+// click on a container node.
+void drawSelectionToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
 {
-    if (node && !dxx::extractCurves3D(*node).empty()) {
-        sendGeometryToHost(node, silentOnFailure);
+    if (!node) {
+        showDrawMessage(silentOnFailure, "Nothing selected.");
         return;
     }
-    if (meshCache) {
-        sendMeshToHost(*meshCache, silentOnFailure);
-        return;
+
+    bool anySent = false;
+    bool anyPublishFailed = false;
+
+    for (const dxx::Curve& curve : dxx::extractCurves3D(*node)) {
+        std::vector<dxx::Point3D> pts = dxx::tessellateCurveWorld(curve);
+        if (pts.size() < 2)
+            continue;
+        std::string data = "{\"points\":[" + joinPointsAsJsonTuples(pts) + "]}";
+        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
+            anySent = true;
+        else
+            anyPublishFailed = true;
     }
-    if (!silentOnFailure) {
-        fl_message_title("Draw in AutoCAD");
-        fl_message(node ? "No curve or mesh geometry in the current selection." : "Nothing selected.");
+
+    auto publishAllMeshes = [&](const std::vector<dxx::MeshBody>& meshes) {
+        for (const dxx::MeshBody& mesh : meshes) {
+            std::optional<std::string> data = buildMeshBlockJson(mesh);
+            if (!data)
+                continue;
+            if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, *data))
+                anySent = true;
+            else
+                anyPublishFailed = true;
+        }
+    };
+    publishAllMeshes(dxx::extractAllMeshBodies(*node));
+    publishAllMeshes(dxx::extractAllGenBeamBoxes(*node));
+
+    if (!anySent) {
+        showDrawMessage(silentOnFailure, anyPublishFailed
+            ? "Failed to publish geometry to the AutoCAD hub (is hsbWebSocketHub running?)."
+            : "No curve, mesh, or beam geometry in the current selection.");
     }
 }
 
 const char* kHubTopic = "map";
 const char* kElementCommandsTopic = "element_commands";
-const char* kAppVersion = "1.0.0";
+const char* kAppVersion = "1.1.0";
 } // namespace
 
 FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
@@ -289,8 +349,8 @@ FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
     updateTitle();
 
     m_hub = std::make_unique<HubClient>(kHubHost, kHubPort, kHubTopic,
-        [this](std::string dxxText, std::string filename) {
-            onMapReceived(std::move(dxxText), std::move(filename));
+        [this](std::optional<dxx::DxxDocument> doc, std::string filename) {
+            onMapReceived(std::move(doc), std::move(filename));
         },
         [this](bool connected) { onHubConnectionChanged(connected); });
 
@@ -404,7 +464,7 @@ void FltkMainWindow::buildLayout()
     Fl_Button* btnSendToAcad = new Fl_Button(0, 0, 0, 0, kSendToAcadLabel);
 
     Fl_Button* btnDraw = new Fl_Button(0, 0, 0, 0, kDrawLabel);
-    btnDraw->tooltip("Draw the selected node's curve geometry in AutoCAD");
+    btnDraw->tooltip("Draw every curve/mesh/beam found under the selected node in AutoCAD");
 
     m_toolbarRow2->fixed(btnSendToAcad, 90);
     m_toolbarRow2->fixed(btnDraw, 60);
@@ -463,27 +523,40 @@ void FltkMainWindow::buildLayout()
 
     btnDraw->callback([](Fl_Widget*, void* data) {
         auto* self = static_cast<FltkMainWindow*>(data);
-        drawSelectionToHost(self->m_selectedNode, self->m_meshCache.get());
+        drawSelectionToHost(self->m_selectedNode);
     }, this);
 }
 
-bool FltkMainWindow::openFile(const char* path)
+void FltkMainWindow::openFile(const char* path)
 {
-    auto doc = dxx::parseFile(path ? path : "");
-    if (!doc) {
-        fl_alert("Failed to parse file:\n%s", path ? path : "");
-        return false;
-    }
-    m_filePath = path ? path : "";
-    m_fromMap = false;
-    m_fromElementCommands = false;
-    displayDocument(std::move(*doc));
-    return true;
+    if (!path || !*path) return;
+
+    // Parsing (dxx::parseFile) runs on a detached background thread, not
+    // here - a large file's parse cost would otherwise freeze the whole
+    // window for however long it takes. Only the already-built
+    // optional<DxxDocument> crosses back to the main thread (via
+    // postToMain), same off-thread-parse/main-thread-display split
+    // HubClient uses for a hub-received map. `this` outliving the thread is
+    // safe: FltkMainWindow lives for the whole app run, far longer than one
+    // file parse.
+    std::string pathStr = path;
+    std::thread([this, pathStr]() {
+        auto doc = dxx::parseFile(pathStr);
+        postToMain([this, doc = std::move(doc), pathStr]() mutable {
+            if (!doc) {
+                fl_alert("Failed to parse file:\n%s", pathStr.c_str());
+                return;
+            }
+            m_filePath = pathStr;
+            m_fromMap = false;
+            m_fromElementCommands = false;
+            displayDocument(std::move(*doc));
+        });
+    }).detach();
 }
 
-void FltkMainWindow::onMapReceived(std::string dxxText, std::string filename)
+void FltkMainWindow::onMapReceived(std::optional<dxx::DxxDocument> doc, std::string filename)
 {
-    auto doc = dxx::parseString(dxxText);
     if (!doc) {
         std::fprintf(stderr, "dxxviewer: failed to parse map received from hub\n");
         return;
@@ -565,18 +638,34 @@ void FltkMainWindow::onNodeSelected(const dxx::DxxNode* node)
     m_selectedNode = node;
     m_props->fill(node);
 
-    m_meshCache.reset();
+    // The local 3D preview shows EVERYTHING under the selection, not just one
+    // nearest match - selecting a container node (e.g. the document root)
+    // previously only ever previewed the first mesh/beam encountered, which
+    // read as an incomplete/broken preview once extractAllMeshBodies/
+    // extractAllGenBeamBoxes made it possible to gather all of them.
+    // Kept as two SEPARATE merged caches (not one combined MeshBody) so
+    // FltkMeshWidget can render real meshes (walls/sheets) semi-transparent
+    // while keeping GenBeam boxes opaque - the whole point of gathering every
+    // element under a selection is to see the beams that would otherwise be
+    // hidden inside a wall's solid.
+    m_wallMeshCache.reset();
+    m_beamMeshCache.reset();
     if (node) {
-        if (auto mesh = dxx::extractMeshBody(*node))
-            m_meshCache = std::make_unique<dxx::MeshBody>(std::move(*mesh));
+        std::vector<dxx::MeshBody> walls = dxx::extractAllMeshBodies(*node);
+        if (!walls.empty())
+            m_wallMeshCache = std::make_unique<dxx::MeshBody>(dxx::mergeMeshBodies(walls));
+
+        std::vector<dxx::MeshBody> beams = dxx::extractAllGenBeamBoxes(*node);
+        if (!beams.empty())
+            m_beamMeshCache = std::make_unique<dxx::MeshBody>(dxx::mergeMeshBodies(beams));
     }
 
-    if (m_meshCache) {
+    if (m_wallMeshCache || m_beamMeshCache) {
         m_geom->hide();
-        m_mesh->showMesh(m_meshCache.get());
+        m_mesh->showMeshes(m_wallMeshCache.get(), m_beamMeshCache.get());
         m_mesh->show();
     } else {
-        m_mesh->showMesh(nullptr);
+        m_mesh->showMeshes(nullptr, nullptr);
         m_mesh->hide();
         m_geom->show();
         m_geom->showNode(node);
@@ -601,16 +690,27 @@ void FltkMainWindow::onNodeSelected(const dxx::DxxNode* node)
     // every single CURVE click either.
     //
     // Same idea, added for mesh selections (e.g. a MassElement/SimpleBody):
-    // reuses m_meshCache - the exact "does this selection resolve to a mesh"
-    // check the preview pane just above already made - rather than a second
-    // extractMeshBody() search, and deliberately does NOT broaden the CURVE
+    // deliberately does NOT reuse m_wallMeshCache/m_beamMeshCache any more -
+    // those now hold EVERYTHING merged under the selection (for the local
+    // preview above), and auto-firing on every tree click has to stay
+    // narrow, or selecting a
+    // container node while just browsing (e.g. clicking the root) would
+    // silently publish one giant combined block to AutoCAD. Re-runs the
+    // original single-nearest search instead, so auto-draw still only ever
+    // fires for a genuinely single mesh/beam - the "draw everything under
+    // this selection" behavior is reserved for an explicit "Draw" click
+    // (drawSelectionToHost). Also deliberately does NOT broaden the CURVE
     // branch's own literal-name gate to match (kept exactly as before, not
     // "any ancestor with a nested curve", to avoid changing existing
     // curve-auto-draw behavior at all).
-    if (node && node->name == "CURVE" && !dxx::extractCurves3D(*node).empty())
+    if (node && node->name == "CURVE" && !dxx::extractCurves3D(*node).empty()) {
         sendGeometryToHost(node, /*silentOnFailure=*/true);
-    else if (m_meshCache)
-        sendMeshToHost(*m_meshCache, /*silentOnFailure=*/true);
+    } else if (node) {
+        if (auto single = dxx::extractMeshBody(*node))
+            sendMeshToHost(*single, /*silentOnFailure=*/true);
+        else if (auto singleBeam = dxx::extractGenBeamBox(*node))
+            sendMeshToHost(*singleBeam, /*silentOnFailure=*/true);
+    }
 }
 
 void FltkMainWindow::doSearch()

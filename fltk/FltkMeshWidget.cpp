@@ -20,9 +20,10 @@ FltkMeshWidget::FltkMeshWidget(int x, int y, int w, int h, const char* label)
     mode(FL_RGB | FL_DEPTH | FL_DOUBLE | FL_MULTISAMPLE);
 }
 
-void FltkMeshWidget::showMesh(const dxx::MeshBody* mesh)
+void FltkMeshWidget::showMeshes(const dxx::MeshBody* walls, const dxx::MeshBody* beams)
 {
-    m_mesh = mesh;
+    m_wallMesh = walls;
+    m_beamMesh = beams;
     resetView();
     redraw();
 }
@@ -39,15 +40,23 @@ void FltkMeshWidget::fitView()
 {
     m_centerX = m_centerY = m_centerZ = 0.0;
     m_radius = 1.0;
-    if (!m_mesh || m_mesh->vertices.empty()) return;
 
     double minX = 1e300, minY = 1e300, minZ = 1e300;
     double maxX = -1e300, maxY = -1e300, maxZ = -1e300;
-    for (const auto& v : m_mesh->vertices) {
-        minX = std::min(minX, v.x); maxX = std::max(maxX, v.x);
-        minY = std::min(minY, v.y); maxY = std::max(maxY, v.y);
-        minZ = std::min(minZ, v.z); maxZ = std::max(maxZ, v.z);
-    }
+    bool any = false;
+    auto accumulate = [&](const dxx::MeshBody* mesh) {
+        if (!mesh) return;
+        for (const auto& v : mesh->vertices) {
+            minX = std::min(minX, v.x); maxX = std::max(maxX, v.x);
+            minY = std::min(minY, v.y); maxY = std::max(maxY, v.y);
+            minZ = std::min(minZ, v.z); maxZ = std::max(maxZ, v.z);
+            any = true;
+        }
+    };
+    accumulate(m_wallMesh);
+    accumulate(m_beamMesh);
+    if (!any) return;
+
     m_centerX = (minX + maxX) / 2.0;
     m_centerY = (minY + maxY) / 2.0;
     m_centerZ = (minZ + maxZ) / 2.0;
@@ -79,7 +88,9 @@ void FltkMeshWidget::draw()
     glClearColor(0.96f, 0.96f, 0.96f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    if (!m_mesh || m_mesh->vertices.empty() || m_mesh->faces.empty()) {
+    bool hasWalls = m_wallMesh && !m_wallMesh->vertices.empty() && !m_wallMesh->faces.empty();
+    bool hasBeams = m_beamMesh && !m_beamMesh->vertices.empty() && !m_beamMesh->faces.empty();
+    if (!hasWalls && !hasBeams) {
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glOrtho(0, w(), 0, h(), -1, 1);
@@ -103,8 +114,28 @@ void FltkMeshWidget::draw()
     glRotated(m_yaw, 0, 1, 0);
     glTranslated(-m_centerX, -m_centerY, -m_centerZ);
 
-    if (m_shaded) drawShadedFaces();
-    drawWireframeEdges();
+    // Beams (opaque) drawn first so their color/depth are already in the
+    // buffers when the walls' semi-transparent pass reads/blends against
+    // them - walls skip the depth WRITE (not the depth test) so they never
+    // occlude a beam drawn after them, while still being correctly hidden
+    // behind whatever's already opaque in front of them.
+    if (m_shaded) {
+        if (hasBeams) drawShadedFaces(*m_beamMesh, 0.80f, 0.58f, 0.32f, 1.0f);
+        if (hasWalls) {
+            // Alpha kept quite low (not just "a bit see-through"): a wall's
+            // own near AND far face both get drawn (no face culling - face
+            // winding isn't guaranteed consistent, see drawShadedFaces'
+            // two-sided lighting), so looking through a wall box stacks TWO
+            // translucent layers, compounding to roughly 1-(1-a)^2 effective
+            // opacity - 0.35 alone looked barely more transparent than solid
+            // once doubled.
+            glDepthMask(GL_FALSE);
+            drawShadedFaces(*m_wallMesh, 0.58f, 0.70f, 0.83f, 0.15f);
+            glDepthMask(GL_TRUE);
+        }
+    }
+    if (hasBeams) drawWireframeEdges(*m_beamMesh);
+    if (hasWalls) drawWireframeEdges(*m_wallMesh);
     drawHint();
 }
 
@@ -132,7 +163,7 @@ void FltkMeshWidget::setupProjection()
     }
 }
 
-void FltkMeshWidget::drawShadedFaces()
+void FltkMeshWidget::drawShadedFaces(const dxx::MeshBody& mesh, float r, float g, float b, float alpha)
 {
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
@@ -150,8 +181,8 @@ void FltkMeshWidget::drawShadedFaces()
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
 
-    glColor3f(0.58f, 0.70f, 0.83f);
-    for (const auto& face : m_mesh->faces) {
+    glColor4f(r, g, b, alpha);
+    for (const auto& face : mesh.faces) {
         if (face.size() < 3) continue;
 
         // Flat per-face normal via Newell's method - robust to a slightly
@@ -161,8 +192,8 @@ void FltkMeshWidget::drawShadedFaces()
         size_t n = face.size();
         auto pointOf = [&](size_t i) -> const dxx::Point3D* {
             int idx = face[i];
-            if (idx < 0 || static_cast<size_t>(idx) >= m_mesh->vertices.size()) return nullptr;
-            return &m_mesh->vertices[static_cast<size_t>(idx)];
+            if (idx < 0 || static_cast<size_t>(idx) >= mesh.vertices.size()) return nullptr;
+            return &mesh.vertices[static_cast<size_t>(idx)];
         };
         for (size_t i = 0; i < n; ++i) {
             const dxx::Point3D* a = pointOf(i);
@@ -190,14 +221,14 @@ void FltkMeshWidget::drawShadedFaces()
     glDisable(GL_COLOR_MATERIAL);
 }
 
-void FltkMeshWidget::drawWireframeEdges()
+void FltkMeshWidget::drawWireframeEdges(const dxx::MeshBody& mesh)
 {
     glColor3f(0.10f, 0.35f, 0.65f);
-    for (const auto& face : m_mesh->faces) {
+    for (const auto& face : mesh.faces) {
         glBegin(GL_LINE_LOOP);
         for (int idx : face) {
-            if (idx < 0 || static_cast<size_t>(idx) >= m_mesh->vertices.size()) continue;
-            const auto& p = m_mesh->vertices[static_cast<size_t>(idx)];
+            if (idx < 0 || static_cast<size_t>(idx) >= mesh.vertices.size()) continue;
+            const auto& p = mesh.vertices[static_cast<size_t>(idx)];
             glVertex3d(p.x, p.y, p.z);
         }
         glEnd();

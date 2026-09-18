@@ -1,7 +1,10 @@
 #pragma once
 
+#include "../dxx_parser.h"
+
 #include <atomic>
 #include <functional>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -19,17 +22,23 @@ namespace dxxviewer {
 // Fl::awake - callers must have called Fl::lock() once at startup.
 class HubClient {
 public:
-    // onMapText fires with (dxxText, filename) every time a message arrives
-    // on `topic`. `filename` is whatever the producer attached (e.g. the
-    // "filename" field of the toolkit's `cb64 | sendws` shape - see
-    // dotnet/TOOLKIT.md) or empty if the producer sent none (e.g. a plain
-    // `sendws --topic map` line publishing the DXX text as a bare JSON
-    // string). onConnectionChanged fires with true right after the
-    // subscribe handshake succeeds and with false when that connection is
-    // lost (before each reconnect attempt) - so a caller can reflect live
-    // hub status (e.g. in a window title) without polling.
+    // onMapDocument fires with (doc, filename) every time a message arrives
+    // on `topic` - parsing (dxx::parseString) happens on this class's own
+    // background thread, BEFORE the hop to the main thread, so a large
+    // model doesn't block the FLTK UI while it parses; only the already-
+    // built DxxDocument crosses over via Fl::awake. `doc` is nullopt if the
+    // payload decoded to text but dxx::parseString itself failed (e.g.
+    // empty text) - the caller decides whether/how to report that.
+    // `filename` is whatever the producer attached (e.g. the "filename"
+    // field of the toolkit's `cb64 | sendws` shape - see dotnet/TOOLKIT.md)
+    // or empty if the producer sent none (e.g. a plain `sendws --topic map`
+    // line publishing the DXX text as a bare JSON string). onConnectionChanged
+    // fires with true right after the subscribe handshake succeeds and with
+    // false when that connection is lost (before each reconnect attempt) -
+    // so a caller can reflect live hub status (e.g. in a window title)
+    // without polling.
     HubClient(std::string host, unsigned short port, std::string topic,
-               std::function<void(std::string dxxText, std::string filename)> onMapText,
+               std::function<void(std::optional<dxx::DxxDocument> doc, std::string filename)> onMapDocument,
                std::function<void(bool)> onConnectionChanged);
 
     // Raw mode: delivers every non-control-reply broadcast on `topic`
@@ -52,7 +61,7 @@ private:
     unsigned short m_port;
     std::string m_topic;
     bool m_rawMode = false;
-    std::function<void(std::string, std::string)> m_onMapText;
+    std::function<void(std::optional<dxx::DxxDocument>, std::string)> m_onMapDocument;
     std::function<void(std::string)> m_onRawMessage;
     std::function<void(bool)> m_onConnectionChanged;
     std::atomic<bool> m_stop{false};

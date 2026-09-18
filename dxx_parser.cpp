@@ -491,23 +491,34 @@ const DxxNode* findMeshContainer(const DxxNode& node, int depth = 0) {
     return nullptr;
 }
 
-} // anonymous namespace
-
-std::optional<MeshBody> extractMeshBody(const DxxNode& node) {
-    const DxxNode* container = findMeshContainer(node);
-    if (!container) return std::nullopt;
+// Like findMeshContainer, but appends every container found anywhere under
+// `node` to `out` instead of stopping at the first - a matched container's
+// own children are just vertexList/faceList/metadata (never a nested
+// container in practice), so not recursing into them mirrors
+// findMeshContainer's own non-recursive-into-match behavior.
+void collectMeshContainers(const DxxNode& node, std::vector<const DxxNode*>& out, int depth = 0) {
+    if (depth > kMaxNodeDepth) return;
 
     const DxxNode* vertexList = nullptr;
     const DxxNode* faceList = nullptr;
-    for (const auto& child : container->children) {
+    for (const auto& child : node.children) {
         if (child.name == "vertexList") vertexList = &child;
         else if (child.name == "faceList") faceList = &child;
     }
+    if (vertexList && faceList) {
+        out.push_back(&node);
+        return;
+    }
 
+    for (const auto& child : node.children)
+        collectMeshContainers(child, out, depth + 1);
+}
+
+std::optional<MeshBody> buildMeshBodyFromLists(const DxxNode& vertexList, const DxxNode& faceList) {
     MeshBody mesh;
     Point3D cur;
     int have = 0;
-    for (const auto& [key, val] : vertexList->properties) {
+    for (const auto& [key, val] : vertexList.properties) {
         double d = std::strtod(val.c_str(), nullptr);
         if (key == "10pX") { cur.x = d; have |= 1; }
         else if (key == "10pY") { cur.y = d; have |= 2; }
@@ -518,7 +529,7 @@ std::optional<MeshBody> extractMeshBody(const DxxNode& node) {
         }
     }
 
-    for (const auto& [key, val] : faceList->properties) {
+    for (const auto& [key, val] : faceList.properties) {
         if (key != "f") continue;
         std::vector<int> indices;
         size_t start = 0;
@@ -534,6 +545,117 @@ std::optional<MeshBody> extractMeshBody(const DxxNode& node) {
 
     if (mesh.vertices.empty() || mesh.faces.empty()) return std::nullopt;
     return mesh;
+}
+
+// Finds `container`'s vertexList/faceList children (both guaranteed present,
+// since only findMeshContainer/collectMeshContainers matches ever get here)
+// and builds the MeshBody from them.
+std::optional<MeshBody> buildMeshBodyFromContainer(const DxxNode& container) {
+    const DxxNode* vertexList = nullptr;
+    const DxxNode* faceList = nullptr;
+    for (const auto& child : container.children) {
+        if (child.name == "vertexList") vertexList = &child;
+        else if (child.name == "faceList") faceList = &child;
+    }
+    return buildMeshBodyFromLists(*vertexList, *faceList);
+}
+
+} // anonymous namespace
+
+std::optional<MeshBody> extractMeshBody(const DxxNode& node) {
+    const DxxNode* container = findMeshContainer(node);
+    if (!container) return std::nullopt;
+    return buildMeshBodyFromContainer(*container);
+}
+
+std::vector<MeshBody> extractAllMeshBodies(const DxxNode& node) {
+    std::vector<const DxxNode*> containers;
+    collectMeshContainers(node, containers);
+
+    std::vector<MeshBody> result;
+    for (const DxxNode* container : containers)
+        if (auto mesh = buildMeshBodyFromContainer(*container))
+            result.push_back(std::move(*mesh));
+    return result;
+}
+
+namespace {
+
+const DxxNode* findGenBeamNode(const DxxNode& node, int depth = 0) {
+    if (depth > kMaxNodeDepth) return nullptr;
+    if (node.name == "GenBeam") return &node;
+    for (const auto& child : node.children)
+        if (const DxxNode* found = findGenBeamNode(child, depth + 1)) return found;
+    return nullptr;
+}
+
+std::optional<MeshBody> buildGenBeamBox(const DxxNode& beam) {
+    Point3D center{beam.getDouble("11ptCenX"), beam.getDouble("11ptCenY"), beam.getDouble("11ptCenZ")};
+    Vec3D vx{beam.getDouble("13vecXX"), beam.getDouble("13vecXY"), beam.getDouble("13vecXZ")};
+    Vec3D vy{beam.getDouble("13vecYX"), beam.getDouble("13vecYY"), beam.getDouble("13vecYZ")};
+    Vec3D vz{beam.getDouble("13vecZX"), beam.getDouble("13vecZY"), beam.getDouble("13vecZZ")};
+    double halfL = beam.getDouble("40dL") / 2.0;
+    double halfW = beam.getDouble("40dW") / 2.0;
+    double halfH = beam.getDouble("40dH") / 2.0;
+    if (halfL <= 0 || halfW <= 0 || halfH <= 0) return std::nullopt;
+
+    // Corner i is center + sign(bit2)*halfL*vx + sign(bit1)*halfW*vy +
+    // sign(bit0)*halfH*vz, pushed in that same bit order below - the face
+    // list further down depends on this exact indexing.
+    MeshBody mesh;
+    mesh.vertices.reserve(8);
+    for (double sl : {-1.0, 1.0})
+        for (double sw : {-1.0, 1.0})
+            for (double sh : {-1.0, 1.0}) {
+                mesh.vertices.push_back({
+                    center.x + sl * halfL * vx.x + sw * halfW * vy.x + sh * halfH * vz.x,
+                    center.y + sl * halfL * vx.y + sw * halfW * vy.y + sh * halfH * vz.y,
+                    center.z + sl * halfL * vx.z + sw * halfW * vy.z + sh * halfH * vz.z,
+                });
+            }
+
+    mesh.faces = {
+        {0, 1, 3, 2}, // -L
+        {4, 5, 7, 6}, // +L
+        {0, 1, 5, 4}, // -W
+        {2, 3, 7, 6}, // +W
+        {0, 2, 6, 4}, // -H
+        {1, 3, 7, 5}, // +H
+    };
+    return mesh;
+}
+
+} // anonymous namespace
+
+std::optional<MeshBody> extractGenBeamBox(const DxxNode& node) {
+    const DxxNode* beam = findGenBeamNode(node);
+    if (!beam) return std::nullopt;
+    return buildGenBeamBox(*beam);
+}
+
+std::vector<MeshBody> extractAllGenBeamBoxes(const DxxNode& node) {
+    std::vector<MeshBody> result;
+    walkNode(node, [&](const DxxNode& n) {
+        if (n.name != "GenBeam") return;
+        if (auto box = buildGenBeamBox(n))
+            result.push_back(std::move(*box));
+    });
+    return result;
+}
+
+MeshBody mergeMeshBodies(const std::vector<MeshBody>& meshes) {
+    MeshBody merged;
+    for (const auto& mesh : meshes) {
+        int offset = static_cast<int>(merged.vertices.size());
+        merged.vertices.insert(merged.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
+        for (const auto& face : mesh.faces) {
+            std::vector<int> shifted;
+            shifted.reserve(face.size());
+            for (int idx : face) shifted.push_back(idx + offset);
+            merged.faces.push_back(std::move(shifted));
+        }
+    }
+    return merged;
 }
 
 } // namespace dxx
