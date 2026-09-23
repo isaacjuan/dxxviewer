@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37516.0 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dxxviewer", "dxxviewer.vcxproj", "{FE0C7061-0D18-44D7-BFE7-6B19F8C1A477}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FE0C7061-0D18-44D7-BFE7-6B19F8C1A477}.Debug|x64.ActiveCfg = Debug|x64
+		{FE0C7061-0D18-44D7-BFE7-6B19F8C1A477}.Debug|x64.Build.0 = Debug|x64
+		{FE0C7061-0D18-44D7-BFE7-6B19F8C1A477}.Release|x64.ActiveCfg = Release|x64
+		{FE0C7061-0D18-44D7-BFE7-6B19F8C1A477}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8266770E-0D76-4CEF-8B05-E029D22687F8}
+	EndGlobalSection
+EndGlobal
