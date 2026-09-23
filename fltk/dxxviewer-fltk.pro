@@ -16,8 +16,13 @@ TARGET = dxxviewer-fltk
 
 FLTK_ROOT  = C:/Users/jissi/fltk-install
 CAIRO_ROOT = C:/msys64/mingw64
+LUA_DIR    = $$PWD/../third_party/lua
 
-INCLUDEPATH += $$PWD $$PWD/.. $$FLTK_ROOT/include $$CAIRO_ROOT/include/cairo
+INCLUDEPATH += $$PWD $$PWD/.. $$LUA_DIR $$FLTK_ROOT/include $$CAIRO_ROOT/include/cairo
+
+# Vendored Lua 5.5 for settings.lua (skip the two standalone mains).
+LUA_SOURCES = $$files($$LUA_DIR/*.c)
+LUA_SOURCES -= $$LUA_DIR/lua.c $$LUA_DIR/luac.c
 
 SOURCES += \
     fltk_main.cpp \
@@ -28,8 +33,10 @@ SOURCES += \
     FltkMeshWidget.cpp \
     HubClient.cpp \
     ElementCommandsBridge.cpp \
+    ../settings.cpp \
     ../dxx_parser.cpp \
-    ../gzip_decompress.cpp
+    ../gzip_decompress.cpp \
+    $$LUA_SOURCES
 
 HEADERS += \
     FltkMainWindow.h \
@@ -39,6 +46,7 @@ HEADERS += \
     FltkMeshWidget.h \
     HubClient.h \
     ElementCommandsBridge.h \
+    ../settings.h \
     ../dxx_parser.h \
     ../colors.h \
     ../third_party/json.hpp

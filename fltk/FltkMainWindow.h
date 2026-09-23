@@ -23,7 +23,8 @@ class HubClient;
 // mesh widget (FltkMeshWidget) when the selected node contains a
 // SimpleBody-style mesh (see dxx::extractMeshBody); only one is visible
 // at a time. Also runs two HubClients against hsbWebSocketHub
-// (127.0.0.1:8181): one on the "map" topic so a DXX document can arrive
+// (endpoint from settings.lua: hub.host/hub.port, default 127.0.0.1:8181):
+// one on the "map" topic so a DXX document can arrive
 // live over the network instead of only from disk, and one on the
 // "element_commands" topic (raw mode - see HubClient) carrying JSON
 // "selection_parameters" pushes from a Revit add-in, converted to a

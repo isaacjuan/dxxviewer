@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "FltkMainWindow.h"
+#include "settings.h"
 
 namespace {
 
@@ -27,6 +28,10 @@ void applyWindowsAccent() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // Load settings.lua once up front (palettes, hub endpoint/topics) before
+    // any widget or HubClient touches settings().
+    dxxviewer::settings();
+
     // Required once, before Fl::run(), so HubClient's background thread can
     // deliver received maps to the GUI via Fl::awake().
     Fl::lock();

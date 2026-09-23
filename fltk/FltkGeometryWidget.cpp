@@ -1,5 +1,6 @@
 #include "FltkGeometryWidget.h"
 #include "../colors.h"
+#include "settings.h"
 #include <FL/fl_draw.H>
 #include <FL/Fl.H>
 #include <cairo.h>
@@ -237,7 +238,8 @@ void FltkGeometryWidget::drawCurvesCairo(const std::vector<dxx::Curve>& curves,
         const dxx::Curve& curve = curves[ci];
         if (curve.segments.size() < 2) continue;
 
-        uint32_t rgb = kCurveColorPalette[ci % kCurveColorCount];
+        const auto& pal = settings().curvePalette;
+        uint32_t rgb = pal[ci % pal.size()];
         cairo_set_source_rgb(cr, ((rgb >> 16) & 0xFF) / 255.0,
                                  ((rgb >> 8) & 0xFF) / 255.0,
                                  (rgb & 0xFF) / 255.0);

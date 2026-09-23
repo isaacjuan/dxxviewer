@@ -68,6 +68,21 @@ directory. No stdout on success. (`main.cpp` has a hardcoded default input path
 only used when no argument is passed.) A Visual Studio project
 (`dxxviewer.vcxproj`, x64/v143) also builds the CLI.
 
+### settings.lua (runtime config)
+
+Both the CLI and the FLTK GUI load `settings.lua` once at startup (first
+`dxxviewer::settings()` call) — search order: next to the exe, then the
+current working directory. Externally editable:
+
+- `curve_palette` / `tree_depth_palette` — `#rrggbb`, `#rgb`, or `0xRRGGBB`
+- `hub.host` / `hub.port` — hsbWebSocketHub endpoint
+- `topics.map` / `topics.element_commands` / `topics.geometry`
+
+Missing file or a bad key falls back to the built-in defaults (`colors.h` /
+former compile-time hub constants). Must `return { ... }`.
+Source: `settings.h`/`settings.cpp`; vendored Lua 5.5 in `third_party/lua/`
+(compile with **gcc**, not g++ — see `fltk/build.bat`).
+
 ## Architecture
 
 - **C++20**, built with MinGW g++ (no MSVC/Qt dependency).
@@ -81,7 +96,12 @@ only used when no argument is passed.) A Visual Studio project
     node - in practice a `SimpleBody`, a solid mesh unrelated to CURVE-based
     profiles - and reads it into a flat `MeshBody{vertices, faces}`).
   - `gzip_decompress.cpp` — self-contained inflate; no external compression lib.
-  - `colors.h` — header-only curve/tree-depth color palettes as `uint32_t`.
+  - `colors.h` — header-only **default** curve/tree-depth color palettes as `uint32_t`
+    (used when `settings.lua` is missing or omits a key).
+  - `settings.h` / `settings.cpp` — runtime settings from `settings.lua`
+    (externalized palettes + hsbWebSocketHub host/port/topics). Loader runs once
+    on first `dxxviewer::settings()` call; searches next to the exe, then cwd.
+    Vendored Lua 5.5 lives in `third_party/lua/` (no `lua.c`/`luac.c`).
 - **FLTK GUI** (`fltk/`, namespace `dxxviewer`):
   - `fltk_main.cpp` — entry point (scheme/fonts/accent/window). Calls
     `Fl::lock()` before `Fl::run()` so `HubClient`'s background thread can

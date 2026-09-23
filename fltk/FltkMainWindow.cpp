@@ -10,6 +10,7 @@
 #include "FltkMeshWidget.h"
 #include "HubClient.h"
 #include "ElementCommandsBridge.h"
+#include "settings.h"
 
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -111,16 +112,12 @@ void sendCommandToHost(Fl_Window* window, const char* text)
     ::SendMessage(hParent, WM_COPYDATA, reinterpret_cast<WPARAM>(hSelf), reinterpret_cast<LPARAM>(&cds));
 }
 
-// hsbWebSocketHub host/port - same hub m_hub/m_elementCommandsHub connect to
-// further down in this file, moved up here so sendGeometryToHost (which
-// needs them) doesn't have to wait for those later declarations.
-const char* kHubHost = "127.0.0.1";
-const unsigned short kHubPort = 8181;
-// Third topic on that hub, for "Draw in AutoCAD" (see HsbChatPanelPoc's
-// ChatDockPane.cpp: kGeometryTopic / OnAcadGeometryMessage /
-// HubProtocol.cpp's extractPointsLine, which expects exactly the
-// {"points":[[x,y,z],...]} shape built below).
-const char* kGeometryTopic = "acad_geometry";
+// hsbWebSocketHub endpoint + topics — loaded from settings.lua (settings.h);
+// defaults match the former kHubHost/kHubPort/k*Topic hardcodes. Accessors
+// below keep the call sites reading like the old constants.
+const std::string& hubHost() { return settings().hubHost; }
+unsigned short hubPort() { return settings().hubPort; }
+const std::string& geometryTopic() { return settings().topicGeometry; }
 
 // Shows a "Draw in AutoCAD" status dialog with `message`, unless
 // silentOnFailure - the title is always the same, only the body differs per
@@ -185,7 +182,7 @@ void sendGeometryToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
 
         std::string data = "{\"points\":[" + joinPointsAsJsonTuples(pts) + "]}";
 
-        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
+        if (PublishToHub(hubHost(), hubPort(), geometryTopic(), data))
             anySent = true;
         else
             anyPublishFailed = true;
@@ -276,7 +273,7 @@ void sendMeshToHost(const dxx::MeshBody& mesh, bool silentOnFailure = false)
         return;
     }
 
-    if (!PublishToHub(kHubHost, kHubPort, kGeometryTopic, *data)) {
+    if (!PublishToHub(hubHost(), hubPort(), geometryTopic(), *data)) {
         showDrawMessage(silentOnFailure, "Failed to publish mesh to the AutoCAD hub (is hsbWebSocketHub running?).");
     }
 }
@@ -309,7 +306,7 @@ void drawSelectionToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
         if (pts.size() < 2)
             continue;
         std::string data = "{\"points\":[" + joinPointsAsJsonTuples(pts) + "]}";
-        if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, data))
+        if (PublishToHub(hubHost(), hubPort(), geometryTopic(), data))
             anySent = true;
         else
             anyPublishFailed = true;
@@ -320,7 +317,7 @@ void drawSelectionToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
             std::optional<std::string> data = buildMeshBlockJson(mesh);
             if (!data)
                 continue;
-            if (PublishToHub(kHubHost, kHubPort, kGeometryTopic, *data))
+            if (PublishToHub(hubHost(), hubPort(), geometryTopic(), *data))
                 anySent = true;
             else
                 anyPublishFailed = true;
@@ -336,8 +333,6 @@ void drawSelectionToHost(const dxx::DxxNode* node, bool silentOnFailure = false)
     }
 }
 
-const char* kHubTopic = "map";
-const char* kElementCommandsTopic = "element_commands";
 const char* kAppVersion = "1.1.0";
 } // namespace
 
@@ -348,7 +343,9 @@ FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
     end();
     updateTitle();
 
-    m_hub = std::make_unique<HubClient>(kHubHost, kHubPort, kHubTopic,
+    // First settings() call loads settings.lua (once) — hub endpoint/topics.
+    const Settings& cfg = settings();
+    m_hub = std::make_unique<HubClient>(cfg.hubHost, cfg.hubPort, cfg.topicMap,
         [this](std::optional<dxx::DxxDocument> doc, std::string filename) {
             onMapReceived(std::move(doc), std::move(filename));
         },
@@ -357,7 +354,8 @@ FltkMainWindow::FltkMainWindow(int x, int y, int w, int h, const char* label)
     // Separate connection: the hub relays each topic's broadcasts unwrapped
     // with no topic tag, so one connection can only unambiguously belong to
     // one topic - raw mode, no DXX-shape detection (see HubClient).
-    m_elementCommandsHub = std::make_unique<HubClient>(kHubHost, kHubPort, kElementCommandsTopic,
+    m_elementCommandsHub = std::make_unique<HubClient>(cfg.hubHost, cfg.hubPort,
+        cfg.topicElementCommands,
         [this](std::string rawMessage) {
             onElementCommandsReceived(std::move(rawMessage));
         },
@@ -608,8 +606,13 @@ void FltkMainWindow::updateTitle()
     std::string title = std::string("DXX Viewer ") + kAppVersion;
     if (m_fromElementCommands)
         title += " - " + m_elementCommandsSummary;
-    else if (m_fromMap)
-        title += " - " + (m_mapFilename.empty() ? std::string("map@8181") : m_mapFilename);
+    else if (m_fromMap) {
+        if (m_mapFilename.empty()) {
+            title += " - map@" + std::to_string(hubPort());
+        } else {
+            title += " - " + m_mapFilename;
+        }
+    }
     else if (!m_filePath.empty())
         title += " - " + m_filePath;
     title += m_hubConnected ? "  [hub: connected]" : "  [hub: offline]";

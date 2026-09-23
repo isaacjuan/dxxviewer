@@ -1,5 +1,6 @@
 #include "FltkTreePanel.h"
 #include "../colors.h"
+#include "settings.h"
 #include <FL/fl_draw.H>
 #include <algorithm>
 #include <cctype>
@@ -39,7 +40,8 @@ FltkTreePanel::FltkTreePanel(int x, int y, int w, int h, const char* label)
 
 void FltkTreePanel::setItemColor(Fl_Tree_Item* item, int depth)
 {
-    uint32_t rgb = kTreeDepthColorPalette[depth % kTreeDepthColorCount];
+    const auto& pal = settings().treeDepthPalette;
+    uint32_t rgb = pal[depth % pal.size()];
     item->labelcolor(fl_rgb_color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF));
 }
 

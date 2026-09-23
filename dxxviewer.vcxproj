@@ -74,10 +74,52 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="dxx_parser.cpp" />
     <ClCompile Include="gzip_decompress.cpp" />
+    <ClCompile Include="settings.cpp" />
+    <ClCompile Include="third_party\lua\lapi.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lauxlib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lbaselib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lcode.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lcorolib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lctype.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ldblib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ldebug.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ldo.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ldump.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lfunc.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lgc.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\linit.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\liolib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\llex.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lmathlib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lmem.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\loadlib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lobject.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lopcodes.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\loslib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lparser.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lstate.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lstring.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lstrlib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ltable.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ltablib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\ltm.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lundump.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lutf8lib.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lvm.c"><WarningLevel>Level0</WarningLevel></ClCompile>
+    <ClCompile Include="third_party\lua\lzio.c"><WarningLevel>Level0</WarningLevel></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dxx_parser.h" />
     <ClInclude Include="colors.h" />
+    <ClInclude Include="settings.h" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)third_party\lua;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="settings.lua" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
